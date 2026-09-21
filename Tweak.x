@@ -26,7 +26,13 @@
 #import <ellekit/ellekit.h>
 #import <CoreMotion/CoreMotion.h> // Import CoreMotion framework for sensor spoofing
 #import "LocationSpoofingManager.h" // Import location spoofing manager
+#import "LocationSession.h"
+#import "AppIdentity.h"
+#import "AppIdentityHookSupport.h"
+#import "PXProcessHookPolicy.h"
+#import "PXSysctlHookRouter.h"
 #import "JailbreakDetectionBypass.h" // Import jailbreak detection bypass manager
+#import "VPNDetectionBypass.h"
 
 // Forward declarations for classes we need to hook
 @interface SBScreenshotManager : NSObject
@@ -64,7 +70,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
             NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
             
-            if ([manager isApplicationEnabled:currentBundleID]) {
+            if ([manager shouldSpoofForBundle:currentBundleID]) {
                 // We'd modify the device identifier here if needed
                 // For demonstration, just logging the interception
                 if (oldp && oldlenp && *oldlenp > 0) {
@@ -100,7 +106,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             }
             
             IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-            if (!manager || ![manager isApplicationEnabled:currentBundleID]) {
+            if (!manager || ![manager shouldSpoofForBundle:currentBundleID]) {
                 // App is not in scoped list, pass through to original
                 PXLog(@"App %@ not in scoped list, passing through original sysctlbyname kern.bootargs", currentBundleID);
                 return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
@@ -118,6 +124,17 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
 }
 
+static BOOL PXJailbreakSysctlByNameHandler(const char *name,
+                                           void *oldp,
+                                           size_t *oldlenp,
+                                           void *newp,
+                                           size_t newlen,
+                                           int *result) {
+    if (!name || strcmp(name, "kern.bootargs") != 0) return NO;
+    *result = sysctlbyname_hook(name, oldp, oldlenp, newp, newlen);
+    return YES;
+}
+
 // Define hook group for main identifier spoofing
 %group Identifiers
 
@@ -133,7 +150,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     
     PXLog(@"MGCopyAnswer requested for property: %@ by app: %@", propertyString, currentBundleID);
     
-    if (![manager isApplicationEnabled:currentBundleID]) {
+    if (![manager shouldSpoofForBundle:currentBundleID]) {
         PXLog(@"App not in scope or disabled, passing through original value");
         return %orig;
     }
@@ -197,7 +214,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     
     PXLog(@"IDFA requested by app: %@", currentBundleID);
     
-    if (![manager isApplicationEnabled:currentBundleID]) {
+    if (![manager shouldSpoofForBundle:currentBundleID]) {
         PXLog(@"App not in scope or disabled, passing through original IDFA");
         return %orig;
     }
@@ -205,7 +222,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     if ([manager isIdentifierEnabled:@"IDFA"]) {
         NSString *idfaString = [manager currentValueForIdentifier:@"IDFA"];
         if (idfaString) {
-            PXLog(@"Spoofing IDFA with: %@", idfaString);
+            PXLog(@"Applying generated IDFA for scoped app");
             return [[NSUUID alloc] initWithUUIDString:idfaString];
         }
     }
@@ -224,43 +241,12 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     NSUUID *originalIdentifier = %orig;
     
     @try {
-        if (!%c(IdentifierManager)) {
-            return originalIdentifier;
-        }
-        
-        IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-        NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (!currentBundleID || [currentBundleID hasPrefix:@"com.apple."] || ![manager isApplicationEnabled:currentBundleID]) {
-            return originalIdentifier;
-        }
-        
-        // In iOS 15+, this is the preferred identifier checked by many apps
-        if ([manager isIdentifierEnabled:@"IDFV"]) {
-            NSString *idfvString = [manager currentValueForIdentifier:@"IDFV"];
-            if (idfvString) {
-                // Create a static cache keyed by bundle ID to ensure consistent values
-                static NSMutableDictionary *idfvCache = nil;
-                static dispatch_once_t onceToken;
-                dispatch_once(&onceToken, ^{
-                    idfvCache = [NSMutableDictionary dictionary];
-                });
-                
-                // Thread-safe access to the cache
-                @synchronized(idfvCache) {
-                    NSUUID *cachedValue = idfvCache[currentBundleID];
-                    if (cachedValue) {
-                        return cachedValue;
-                    }
-                    
-                    NSUUID *spoofedIdentifier = [[NSUUID alloc] initWithUUIDString:idfvString];
-                    if (spoofedIdentifier) {
-                        PXLog(@"[WeaponX] Spoofing identifierForVendor with: %@", idfvString);
-                        idfvCache[currentBundleID] = spoofedIdentifier;
-                        return spoofedIdentifier;
-                    }
-                }
-            }
+        // Selected Apps consume the active environment identity even when legacy
+        // per-identifier UI switches are unset. Invalid or stale manifests return nil.
+        NSUUID *generatedIdentifier = PXPrepareCurrentProcessVendorIdentifier();
+        if (generatedIdentifier) {
+            PXLog(@"[WeaponX] Applying generation-scoped identifierForVendor for selected app");
+            return generatedIdentifier;
         }
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] Exception in identifierForVendor: %@", exception);
@@ -281,7 +267,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (!currentBundleID || [currentBundleID hasPrefix:@"com.apple."] || ![manager isApplicationEnabled:currentBundleID]) {
+        if (!currentBundleID || ![manager shouldSpoofForBundle:currentBundleID]) {
             return originalName;
         }
         
@@ -319,7 +305,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     
     PXLog(@"ubiquityIdentityToken requested by app: %@", currentBundleID);
     
-    if (![manager isApplicationEnabled:currentBundleID]) {
+    if (![manager shouldSpoofForBundle:currentBundleID]) {
         PXLog(@"App not in scope or disabled, passing through original ubiquityIdentityToken");
         return %orig;
     }
@@ -351,7 +337,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     
     PXLog(@"NSHost currentHost requested by app: %@", currentBundleID);
     
-    if (![manager isApplicationEnabled:currentBundleID]) {
+    if (![manager shouldSpoofForBundle:currentBundleID]) {
         PXLog(@"App not in scope, returning original host info");
         return originalHost;
     }
@@ -379,7 +365,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (!currentBundleID || [currentBundleID hasPrefix:@"com.apple."] || ![manager isApplicationEnabled:currentBundleID]) {
+        if (!currentBundleID || ![manager shouldSpoofForBundle:currentBundleID]) {
             return originalName;
         }
         
@@ -419,7 +405,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (!currentBundleID || [currentBundleID hasPrefix:@"com.apple."] || ![manager isApplicationEnabled:currentBundleID]) {
+        if (!currentBundleID || ![manager shouldSpoofForBundle:currentBundleID]) {
             return original;
         }
         
@@ -449,7 +435,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (!currentBundleID || [currentBundleID hasPrefix:@"com.apple."] || ![manager isApplicationEnabled:currentBundleID]) {
+        if (!currentBundleID || ![manager shouldSpoofForBundle:currentBundleID]) {
             return original;
         }
         
@@ -480,7 +466,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (!currentBundleID || [currentBundleID hasPrefix:@"com.apple."] || ![manager isApplicationEnabled:currentBundleID]) {
+        if (!currentBundleID || ![manager shouldSpoofForBundle:currentBundleID]) {
             return original;
         }
         
@@ -630,8 +616,10 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 
 %end // End ScreenshotModifier group
 
-// Define hook group for location spoofing
-%group LocationSpoofing
+// Legacy location interception is intentionally left uninitialized. The scoped
+// callback proxy below replaces these process-wide CLLocation/NSObject hooks.
+#if 0
+%group LegacyLocationSpoofing
 
 // Hook CLLocationManager to intercept location updates
 %hook CLLocationManager
@@ -1426,7 +1414,236 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 %end
 
 %end // End of LocationSpoofing group
+#endif
 
+static char PXLocationDelegateProxyAssociationKey;
+
+static BOOL PXLocationProcessIsEligible(void) {
+    @try {
+        NSString *bundleIdentifier = [NSBundle mainBundle].bundleIdentifier;
+        IdentifierManager *identifierManager = [IdentifierManager sharedManager];
+        return bundleIdentifier.length > 0 &&
+            [identifierManager shouldSpoofForBundle:bundleIdentifier];
+    } @catch (NSException *exception) {
+        PXLog(@"[WeaponX] Location scope check failed: %@", exception);
+        return NO;
+    }
+}
+
+static BOOL PXLocationVirtualizationIsEnabled(void) {
+    if (!PXLocationProcessIsEligible()) {
+        return NO;
+    }
+    @try {
+        return [[LocationSpoofingManager sharedManager] isSpoofingEnabled];
+    } @catch (NSException *exception) {
+        PXLog(@"[WeaponX] Location state check failed: %@", exception);
+        return NO;
+    }
+}
+
+static double PXHeadingOrientationOffset(CLDeviceOrientation orientation) {
+    switch (orientation) {
+        case CLDeviceOrientationLandscapeLeft:
+            return 90.0;
+        case CLDeviceOrientationPortraitUpsideDown:
+            return 180.0;
+        case CLDeviceOrientationLandscapeRight:
+            return 270.0;
+        default:
+            return 0.0;
+    }
+}
+
+static void PXLocationProfileGenerationChanged(CFNotificationCenterRef center,
+                                               void *observer,
+                                               CFStringRef name,
+                                               const void *object,
+                                               CFDictionaryRef userInfo) {
+    (void)center;
+    (void)observer;
+    (void)name;
+    (void)object;
+    (void)userInfo;
+    [[LocationSpoofingManager sharedManager] refreshVirtualLocationConfiguration];
+}
+
+static void PXLocationRouteUpdated(CFNotificationCenterRef center,
+                                   void *observer,
+                                   CFStringRef name,
+                                   const void *object,
+                                   CFDictionaryRef userInfo) {
+    (void)center;
+    (void)observer;
+    (void)name;
+    (void)object;
+    (void)userInfo;
+    [[LocationSpoofingManager sharedManager] refreshVirtualRouteContext];
+}
+
+%group LocationSpoofing
+
+%hook CLLocationManager
+
+- (void)setDelegate:(id<CLLocationManagerDelegate>)delegate {
+    if (!delegate || !PXLocationProcessIsEligible()) {
+        objc_setAssociatedObject(self,
+                                 &PXLocationDelegateProxyAssociationKey,
+                                 nil,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        %orig(delegate);
+        return;
+    }
+
+    PXLocationDelegateProxy *existingProxy = objc_getAssociatedObject(
+        self,
+        &PXLocationDelegateProxyAssociationKey
+    );
+    if (existingProxy.originalDelegate == delegate) {
+        %orig((id<CLLocationManagerDelegate>)(id)existingProxy);
+        return;
+    }
+
+    LocationSpoofingManager *spoofingManager = [LocationSpoofingManager sharedManager];
+    PXLocationDelegateProxy *proxy = [[PXLocationDelegateProxy alloc]
+        initWithOriginalDelegate:delegate
+        locationTransformer:^NSArray<CLLocation *> *(CLLocationManager *manager,
+                                                      NSArray<CLLocation *> *locations) {
+            (void)manager;
+            if (!PXLocationVirtualizationIsEnabled()) {
+                return locations;
+            }
+            @try {
+                NSMutableArray<CLLocation *> *transformed = [NSMutableArray
+                    arrayWithCapacity:locations.count];
+                for (CLLocation *location in locations) {
+                    [transformed addObject:[spoofingManager modifySpoofedLocation:location] ?: location];
+                }
+                return [transformed copy];
+            } @catch (NSException *exception) {
+                PXLog(@"[WeaponX] Location callback virtualization failed: %@", exception);
+                return locations;
+            }
+        }
+        legacyTransformer:^NSArray<CLLocation *> *(CLLocationManager *manager,
+                                                    CLLocation *newLocation,
+                                                    CLLocation *oldLocation) {
+            (void)manager;
+            if (!PXLocationVirtualizationIsEnabled()) {
+                return oldLocation ? @[newLocation, oldLocation] : @[newLocation];
+            }
+            @try {
+                CLLocation *previousVirtualLocation = [spoofingManager currentVirtualLocation];
+                CLLocation *transformedNew = [spoofingManager modifySpoofedLocation:newLocation]
+                    ?: newLocation;
+                if (!oldLocation) {
+                    return @[transformedNew];
+                }
+                return @[transformedNew, previousVirtualLocation ?: transformedNew];
+            } @catch (NSException *exception) {
+                PXLog(@"[WeaponX] Legacy location callback virtualization failed: %@", exception);
+                return oldLocation ? @[newLocation, oldLocation] : @[newLocation];
+            }
+        }
+        headingTransformer:^CLHeading *(CLLocationManager *manager, CLHeading *heading) {
+            if (!PXLocationVirtualizationIsEnabled()) {
+                return heading;
+            }
+            @try {
+                return [spoofingManager
+                    modifySpoofedHeading:heading
+                    orientationOffsetDegrees:PXHeadingOrientationOffset(manager.headingOrientation)] ?: heading;
+            } @catch (NSException *exception) {
+                PXLog(@"[WeaponX] Heading callback virtualization failed: %@", exception);
+                return heading;
+            }
+        }];
+    objc_setAssociatedObject(self,
+                             &PXLocationDelegateProxyAssociationKey,
+                             proxy,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    %orig((id<CLLocationManagerDelegate>)(id)proxy);
+}
+
+- (id<CLLocationManagerDelegate>)delegate {
+    PXLocationDelegateProxy *proxy = objc_getAssociatedObject(
+        self,
+        &PXLocationDelegateProxyAssociationKey
+    );
+    if (proxy) {
+        return proxy.originalDelegate;
+    }
+    return %orig;
+}
+
+- (CLLocation *)location {
+    CLLocation *location = %orig;
+    if (!PXLocationVirtualizationIsEnabled()) {
+        return location;
+    }
+    @try {
+        LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
+        CLLocation *current = [manager currentVirtualLocation];
+        if (current || !location) {
+            return current ?: location;
+        }
+        return [manager modifySpoofedLocation:location] ?: location;
+    } @catch (NSException *exception) {
+        PXLog(@"[WeaponX] Direct location virtualization failed: %@", exception);
+        return location;
+    }
+}
+
+- (CLHeading *)heading {
+    CLHeading *heading = %orig;
+    if (!PXLocationVirtualizationIsEnabled()) {
+        return heading;
+    }
+    @try {
+        LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
+        CLHeading *current = [manager currentVirtualHeadingWithSource:heading];
+        if (current || !heading) {
+            return current ?: heading;
+        }
+        return [manager modifySpoofedHeading:heading
+                    orientationOffsetDegrees:PXHeadingOrientationOffset(self.headingOrientation)]
+            ?: heading;
+    } @catch (NSException *exception) {
+        PXLog(@"[WeaponX] Direct heading virtualization failed: %@", exception);
+        return heading;
+    }
+}
+
+%end
+
+%hook CLGeocoder
+
+- (void)reverseGeocodeLocation:(CLLocation *)location
+              completionHandler:(void (^)(NSArray<CLPlacemark *> *placemarks,
+                                           NSError *error))completionHandler {
+    if (!location || !PXLocationVirtualizationIsEnabled()) {
+        %orig;
+        return;
+    }
+    @try {
+        LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
+        CLLocation *transformed = [manager currentVirtualLocation]
+            ?: [manager modifySpoofedLocation:location];
+        %orig(transformed ?: location, completionHandler);
+    } @catch (NSException *exception) {
+        PXLog(@"[WeaponX] Reverse-geocode virtualization failed: %@", exception);
+        %orig;
+    }
+}
+
+%end
+
+%end
+
+// Legacy implementation retained for reference only. CoreMotion data classes
+// are immutable; the active implementation lives in SensorHooks.x and wraps
+// original samples with forwarding proxies.
+#if 0
 // Add new group for sensor data integration
 %group SensorSpoofing
 
@@ -1748,6 +1965,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 %end
 
 %end  // End of SensorSpoofing group
+#endif
 
 // Early initialization for ElleKit - runs before process fully launches
 static void earlyInitCallback(void) {
@@ -1762,7 +1980,7 @@ static void earlyInitCallback(void) {
     PXLog(@"Preparing early protection for process: %@", bundleExecutable ?: @"Unknown");
     
     // Check if we're using ElleKit
-    if (EKIsElleKitEnv()) {
+    if (dlsym(RTLD_DEFAULT, "EKHook")) {
         PXLog(@"Running in ElleKit environment - enabling advanced protection");
     }
 }
@@ -1790,45 +2008,7 @@ static void setupHookingEnvironment() {
 }
 
 // Function pointer declarations for rebinding
-static int (*getifaddrs_orig)(struct ifaddrs **ifap);
 static int (*gethostname_orig)(char *name, size_t namelen);
-
-// Hook implementation for getifaddrs
-static int getifaddrs_hook(struct ifaddrs **ifap) {
-    int result = getifaddrs_orig(ifap);
-    if (result == 0 && ifap && *ifap) {
-        // Check if jailbreak detection bypass is enabled
-        NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
-        BOOL jailbreakDetectionEnabled = [securitySettings boolForKey:@"jailbreakDetectionEnabled"];
-        
-        if (!jailbreakDetectionEnabled) {
-            return result; // Skip if bypass is disabled
-        }
-        
-        // Check if the current app is in the scoped apps list
-        NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!currentBundleID) {
-            return result;
-        }
-        
-        IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-        if (!manager || ![manager isApplicationEnabled:currentBundleID]) {
-            return result; // Skip if app is not in scoped list
-        }
-        
-        // Loop through network interfaces and modify MAC addresses
-        struct ifaddrs *ifa = *ifap;
-        while (ifa) {
-            if (ifa->ifa_addr && ifa->ifa_addr->sa_family == AF_LINK) {
-                // Here you'd modify the link-level address (MAC)
-                // For safety, we'll just log it here
-                PXLog(@"Protected MAC address for interface: %s for app: %@", ifa->ifa_name, currentBundleID);
-            }
-            ifa = ifa->ifa_next;
-        }
-    }
-    return result;
-}
 
 // Hook implementation for gethostname
 static int gethostname_hook(char *name, size_t namelen) {
@@ -1850,7 +2030,7 @@ static int gethostname_hook(char *name, size_t namelen) {
     }
     
     IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-    if (!manager || ![manager isApplicationEnabled:currentBundleID]) {
+    if (!manager || ![manager shouldSpoofForBundle:currentBundleID]) {
         return result; // Skip if app is not in scoped list
     }
     
@@ -1882,7 +2062,7 @@ static void antiDetectionCallback(void) {
     }
     
     IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-    if (!manager || ![manager isApplicationEnabled:currentBundleID]) {
+    if (!manager || ![manager shouldSpoofForBundle:currentBundleID]) {
         return; // Skip if app is not in scoped list
     }
     
@@ -1909,7 +2089,7 @@ CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStri
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
         
         // Skip spoofing for system processes or if application isn't enabled
-        if (!currentBundleID || [currentBundleID hasPrefix:@"com.apple."] || ![manager isApplicationEnabled:currentBundleID]) {
+        if (![manager shouldSpoofForBundle:currentBundleID]) {
             return orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
         }
         
@@ -1997,7 +2177,7 @@ static char* hook_GSSystemGetSerialNo(void) {
         return serialStr;
     }
     
-    if (![manager isApplicationEnabled:currentBundleID]) {
+    if (![manager shouldSpoofForBundle:currentBundleID]) {
         PXLog(@"App not in scope or disabled, passing through original serial number");
         return orig_GSSystemGetSerialNo();
     }
@@ -2020,8 +2200,60 @@ static char* hook_GSSystemGetSerialNo(void) {
 
 // Constructor
 %ctor {
+    PXProcessHookScope hookScope = PXCurrentProcessHookScope();
+    if (hookScope == PXProcessHookScopeNone) {
+        return;
+    }
+    if (hookScope == PXProcessHookScopeSpringBoard) {
+        setupHookingEnvironment();
+        PXLog(@"[ProcessPolicy] Initializing SpringBoard-only ProjectX hooks");
+        %init(ScreenshotModifier);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSUserDefaults *securitySettings =
+                [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
+            [securitySettings synchronize];
+            ProfileIndicatorView *indicator = [ProfileIndicatorView sharedInstance];
+            if ([securitySettings boolForKey:@"profileIndicatorEnabled"]) {
+                [indicator show];
+            } else {
+                [indicator hide];
+            }
+        });
+        return;
+    }
+    if (!PXCurrentProcessMayInstallApplicationHooks()) {
+        return;
+    }
+
     // Add at beginning of ctor
     setupHookingEnvironment();
+    PXInitializeLocationHooksOnce(^{
+        %init(LocationSpoofing);
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            NULL,
+            PXLocationProfileGenerationChanged,
+            CFSTR("com.hydra.projectx.profileGenerationChanged"),
+            NULL,
+            CFNotificationSuspensionBehaviorDeliverImmediately
+        );
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            NULL,
+            PXLocationProfileGenerationChanged,
+            CFSTR("com.hydra.projectx.locationChanged"),
+            NULL,
+            CFNotificationSuspensionBehaviorDeliverImmediately
+        );
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            NULL,
+            PXLocationRouteUpdated,
+            CFSTR("com.hydra.projectx.locationRouteUpdated"),
+            NULL,
+            CFNotificationSuspensionBehaviorDeliverImmediately
+        );
+    });
     
     PXLog(@"ProjectX tweak initializing...");
     
@@ -2071,42 +2303,41 @@ static char* hook_GSSystemGetSerialNo(void) {
     
     // Detect which hook system is being used
     NSString *hookSystem = @"Unknown";
-    if (dlsym(RTLD_DEFAULT, "EKMethodsEqual")) {
-        hookSystem = @"ElleKit";
+    void *elleKitHookSymbol = dlsym(RTLD_DEFAULT, "EKHook");
+    void *substrateHookSymbol = dlsym(RTLD_DEFAULT, "MSHookFunction");
+    PXVPNDetectionHookBackend functionHookBackend = PXVPNDetectionHookBackendForAvailability(
+        elleKitHookSymbol != NULL,
+        substrateHookSymbol != NULL
+    );
+    if (functionHookBackend != PXVPNDetectionHookBackendUnavailable) {
+        hookSystem = functionHookBackend == PXVPNDetectionHookBackendElleKit
+            ? @"ElleKit"
+            : @"MobileSubstrate";
         
-        // ElleKit-specific function hooking for lower-level identifiers
-        // This utilizes ElleKit's powerful low-level symbol rebinding capabilities
+        // Install lower-level hooks through the project compatibility wrapper.
         void *libSystemHandle = dlopen("/usr/lib/libSystem.B.dylib", RTLD_NOW);
         if (libSystemHandle) {
-            // Find symbols for network-related functions that could leak identifiers
-            void *getifaddrsSymbol = dlsym(libSystemHandle, "getifaddrs");
+            // Find symbols for network-related functions that could leak identifiers.
+            // getifaddrs has one owner in NetworkConnectionTypeHooks.x so its
+            // allocation/free pair cannot be wrapped twice.
             void *gethostnameSymbol = dlsym(libSystemHandle, "gethostname");
-            
-            // Hook these functions using ElleKit's API directly
-            if (getifaddrsSymbol) {
-                PXLog(@"Using ElleKit to hook getifaddrs for MAC address protection");
-                // Use the globally defined function instead of defining it inside the constructor
-                EKHook(getifaddrsSymbol, (void *)getifaddrs_hook, (void **)&getifaddrs_orig);
-            }
             
             // Hook gethostname to spoof device name at the system level
             if (gethostnameSymbol) {
-                PXLog(@"Using ElleKit to hook gethostname for device name protection");
-                // Use the globally defined function instead of defining it inside the constructor
-                EKHook(gethostnameSymbol, (void *)gethostname_hook, (void **)&gethostname_orig);
+                if (EKHook(gethostnameSymbol, (void *)gethostname_hook, (void **)&gethostname_orig) != 0) {
+                    PXLog(@"Unable to hook gethostname");
+                }
             }
             
-            // Hook sysctlbyname which is commonly used to get device identifiers
-            void *sysctlbynameSymbol = dlsym(libSystemHandle, "sysctlbyname");
-            if (sysctlbynameSymbol) {
-                PXLog(@"Using ElleKit to hook sysctlbyname for system information protection");
-                EKHook(sysctlbynameSymbol, (void *)sysctlbyname_hook, (void **)&sysctlbyname_orig);
+            // sysctlbyname has one low-level owner. Feature modules register
+            // disjoint key handlers with the shared router.
+            sysctlbyname_orig = PXCallOriginalSysctlByName;
+            if (!PXRegisterSysctlByNameHandler(PXJailbreakSysctlByNameHandler)) {
+                PXLog(@"Unable to register kern.bootargs sysctl handler");
             }
             
             dlclose(libSystemHandle);
         }
-    } else if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
-        hookSystem = @"MobileSubstrate";
     }
     
     PXLog(@"Using hook system: %@", hookSystem);
@@ -2123,42 +2354,6 @@ static char* hook_GSSystemGetSerialNo(void) {
     
     // Initialize our hook group
     %init(Identifiers);
-    
-    // Initialize screenshot modification hooks if we're in SpringBoard
-    NSString *processName = [NSProcessInfo processInfo].processName;
-    if ([processName isEqualToString:@"SpringBoard"]) {
-        PXLog(@"Initializing screenshot hooks in SpringBoard");
-        %init(ScreenshotModifier);
-        
-        // Initialize profile indicator immediately
-        dispatch_async(dispatch_get_main_queue(), ^{
-            // Check if profile indicator is enabled in settings
-            NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
-            [securitySettings synchronize]; // Force synchronization to get latest state
-            
-            BOOL profileIndicatorEnabled = [securitySettings boolForKey:@"profileIndicatorEnabled"];
-            PXLog(@"ProfileIndicator: Checking if indicator should be shown at startup: %@", profileIndicatorEnabled ? @"YES" : @"NO");
-            
-            // Initialize the indicator view regardless of current state
-            PXLog(@"ProfileIndicator: Initializing profile indicator view at SpringBoard startup");
-            ProfileIndicatorView *indicator = [ProfileIndicatorView sharedInstance];
-            
-            // Show indicator if enabled in settings
-            if (profileIndicatorEnabled) {
-                PXLog(@"ProfileIndicator: Enabled in settings, showing indicator");
-                [indicator show];
-                PXLog(@"ProfileIndicator: Show method called during SpringBoard startup");
-            } else {
-                PXLog(@"ProfileIndicator: Disabled in settings, indicator initialized but not shown");
-                // Make sure it's hidden
-                [indicator hide];
-            }
-            
-            // Note: Darwin notification observers are registered within ProfileIndicatorView itself,
-            // so we don't need to register them here. This ensures clean separation of concerns.
-            PXLog(@"ProfileIndicator: Initialization complete, waiting for real-time updates");
-        });
-    }
     
     // Use ElleKit's memory protection modification for direct memory patching
     if (dlsym(RTLD_DEFAULT, "EKMemoryProtect")) {
@@ -2208,32 +2403,22 @@ static char* hook_GSSystemGetSerialNo(void) {
             
             if (!jailbreakDetectionEnabled) {
                 PXLog(@"Jailbreak detection bypass is disabled, skipping anti-jailbreak protection");
-                return;
+            } else {
+                NSString *bundleID = NSBundle.mainBundle.bundleIdentifier;
+                IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
+                if (bundleID.length > 0 && manager && [manager shouldSpoofForBundle:bundleID]) {
+                    PXLog(@"High-security app detected: %@, enabling advanced protection", bundleID);
+                    // For apps in the scoped list, use more aggressive hiding techniques.
+                } else {
+                    PXLog(@"App %@ is outside the active scope; skipping anti-jailbreak protection", bundleID);
+                }
             }
-            
-            NSBundle *mainBundle = [NSBundle mainBundle];
-            NSString *bundleID = [mainBundle bundleIdentifier];
-            
-            // Check if the current app is in the scoped apps list
-            if (!bundleID) {
-                return;
-            }
-            
-            IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-            if (!manager || ![manager isApplicationEnabled:bundleID]) {
-                PXLog(@"App %@ not in scoped list, skipping anti-jailbreak protection", bundleID);
-                return;
-            }
-            
-            // App is in scoped list and jailbreak detection bypass is enabled
-            PXLog(@"High-security app detected: %@, enabling advanced protection", bundleID);
-            // For apps in the scoped list, use more aggressive hiding techniques
         }
     }
     
     // Anti-debugging protection for our own tweak
     // This helps prevent apps from detecting our hooks
-    if (EKIsElleKitEnv()) {
+    if (dlsym(RTLD_DEFAULT, "EKHook")) {
         // Check if jailbreak detection bypass is enabled
         NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
         BOOL jailbreakDetectionEnabled = [securitySettings boolForKey:@"jailbreakDetectionEnabled"];
@@ -2256,13 +2441,10 @@ static char* hook_GSSystemGetSerialNo(void) {
         void *IORegEntryCreateCFPropertyPtr = dlsym(IOKitHandle, "IORegistryEntryCreateCFProperty");
         if (IORegEntryCreateCFPropertyPtr) {
             PXLog(@"Hooking IORegistryEntryCreateCFProperty for serial number spoofing");
-            // Use EKHook for ElleKit or MSHookFunction for Substrate
-            if (EKIsElleKitEnv()) {
-                EKHook(IORegEntryCreateCFPropertyPtr, (void *)hook_IORegistryEntryCreateCFProperty, 
-                      (void **)&orig_IORegistryEntryCreateCFProperty);
-            } else if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
-                MSHookFunction(IORegEntryCreateCFPropertyPtr, (void *)hook_IORegistryEntryCreateCFProperty, 
-                              (void **)&orig_IORegistryEntryCreateCFProperty);
+            if (EKHook(IORegEntryCreateCFPropertyPtr,
+                       (void *)hook_IORegistryEntryCreateCFProperty,
+                       (void **)&orig_IORegistryEntryCreateCFProperty) != 0) {
+                PXLog(@"Unable to hook IORegistryEntryCreateCFProperty");
             }
         }
         dlclose(IOKitHandle);
@@ -2274,22 +2456,17 @@ static char* hook_GSSystemGetSerialNo(void) {
         void *GSSystemGetSerialNoPtr = dlsym(GSHandle, "GSSystemGetSerialNo");
         if (GSSystemGetSerialNoPtr) {
             PXLog(@"Hooking GSSystemGetSerialNo for serial number spoofing");
-            if (EKIsElleKitEnv()) {
-                EKHook(GSSystemGetSerialNoPtr, (void *)hook_GSSystemGetSerialNo, 
-                      (void **)&orig_GSSystemGetSerialNo);
-            } else if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
-                MSHookFunction(GSSystemGetSerialNoPtr, (void *)hook_GSSystemGetSerialNo, 
-                              (void **)&orig_GSSystemGetSerialNo);
+            if (EKHook(GSSystemGetSerialNoPtr,
+                       (void *)hook_GSSystemGetSerialNo,
+                       (void **)&orig_GSSystemGetSerialNo) != 0) {
+                PXLog(@"Unable to hook GSSystemGetSerialNo");
             }
         }
         dlclose(GSHandle);
     }
     
-    // Initialize the location spoofing hooks
-    %init(LocationSpoofing);
-    
-    // Initialize sensor data spoofing hooks
-    %init(SensorSpoofing);
-    
-    PXLog(@"[WeaponX] Location and sensor spoofing hooks initialized");
+    // Sensor hooks are installed by SensorHooks.x. The legacy group above is
+    // intentionally not initialized because CoreMotion data objects are
+    // immutable and cannot be safely modified through KVC.
+    PXLog(@"[WeaponX] Location hooks initialized");
 }

@@ -1,4 +1,5 @@
 #import "ProjectXLogging.h"
+#import "PXRootHidePath.h"
 #import <Foundation/Foundation.h>
 #import <os/log.h>
 
@@ -18,7 +19,10 @@ void PXLog(NSString *format, ...) {
         va_end(args);
         
         // Get timestamp
-        NSString *timestamp = [dateFormatter stringFromDate:[NSDate date]];
+        NSString *timestamp = nil;
+        @synchronized (dateFormatter) {
+            timestamp = [dateFormatter stringFromDate:[NSDate date]];
+        }
         
         // Create formatted log with timestamp
         NSString *logMessage = [NSString stringWithFormat:@"[ProjectX %@] %@", timestamp, message];
@@ -26,19 +30,14 @@ void PXLog(NSString *format, ...) {
         // Determine log file path
         NSString *logFilePath = nil;
         
-        // Check for rootless jailbreak paths
-        NSArray *possiblePaths = @[
-            @"/var/jb/var/mobile/Library/Logs/ProjectX",
-            @"/var/jb/private/var/mobile/Library/Logs/ProjectX",
-            @"/var/LIB/var/mobile/Library/Logs/ProjectX",
-            @"/var/mobile/Library/Logs/ProjectX"
-        ];
-        
-        for (NSString *path in possiblePaths) {
-            if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
-                logFilePath = [path stringByAppendingPathComponent:@"ProjectX.log"];
-                break;
-            }
+        NSString *logsDirectory = PXJBRootPath(@"/var/mobile/Library/Logs/ProjectX");
+        NSError *directoryError = nil;
+        if ([[NSFileManager defaultManager]
+            createDirectoryAtPath:logsDirectory
+      withIntermediateDirectories:YES
+                       attributes:@{NSFilePosixPermissions: @0700}
+                            error:&directoryError]) {
+            logFilePath = [logsDirectory stringByAppendingPathComponent:@"ProjectX.log"];
         }
         
         // Fallback to temp directory if no log paths found
@@ -47,11 +46,19 @@ void PXLog(NSString *format, ...) {
             
             // Attempt to create a logs directory in a location we have access to
             NSString *fallbackPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"ProjectXLogs"];
-            [[NSFileManager defaultManager] createDirectoryAtPath:fallbackPath 
-                                      withIntermediateDirectories:YES 
-                                                       attributes:nil 
-                                                            error:nil];
-            logFilePath = [fallbackPath stringByAppendingPathComponent:@"ProjectX.log"];
+            NSError *fallbackError = nil;
+            if ([[NSFileManager defaultManager]
+                createDirectoryAtPath:fallbackPath
+          withIntermediateDirectories:YES
+                           attributes:@{NSFilePosixPermissions: @0700}
+                                error:&fallbackError]) {
+                logFilePath = [fallbackPath stringByAppendingPathComponent:@"ProjectX.log"];
+            } else {
+                os_log_error(OS_LOG_DEFAULT,
+                             "ProjectX log directory creation failed: %{public}@; fallback failed: %{public}@",
+                             directoryError.localizedDescription,
+                             fallbackError.localizedDescription);
+            }
         }
         
         // Write to file
@@ -61,20 +68,32 @@ void PXLog(NSString *format, ...) {
                 
                 // Create file if it doesn't exist
                 if (![[NSFileManager defaultManager] fileExistsAtPath:logFilePath]) {
-                    [[logMessage stringByAppendingString:@"\n"] writeToFile:logFilePath 
-                                                              atomically:YES 
-                                                                encoding:NSUTF8StringEncoding 
-                                                                   error:nil];
+                    NSError *writeError = nil;
+                    if (![[logMessage stringByAppendingString:@"\n"] writeToFile:logFilePath
+                                                                         atomically:YES
+                                                                           encoding:NSUTF8StringEncoding
+                                                                              error:&writeError]) {
+                        os_log_error(OS_LOG_DEFAULT,
+                                     "ProjectX log write failed: %{public}@",
+                                     writeError.localizedDescription);
+                    }
                 } else {
                     // Append to existing file
                     fileHandle = [NSFileHandle fileHandleForWritingAtPath:logFilePath];
-                    [fileHandle seekToEndOfFile];
-                    [fileHandle writeData:[[logMessage stringByAppendingString:@"\n"] 
-                                          dataUsingEncoding:NSUTF8StringEncoding]];
-                    [fileHandle closeFile];
+                    if (fileHandle) {
+                        [fileHandle seekToEndOfFile];
+                        [fileHandle writeData:[[logMessage stringByAppendingString:@"\n"]
+                                              dataUsingEncoding:NSUTF8StringEncoding]];
+                        [fileHandle closeFile];
+                    } else {
+                        os_log_error(OS_LOG_DEFAULT,
+                                     "ProjectX log file could not be opened for writing");
+                    }
                 }
             } @catch (NSException *e) {
-                // If writing to file fails, at least we have the NSLog
+                os_log_error(OS_LOG_DEFAULT,
+                             "ProjectX log write exception: %{public}@",
+                             e.reason);
             }
         }
         
@@ -85,7 +104,9 @@ void PXLog(NSString *format, ...) {
         }
         
     } @catch (NSException *exception) {
-        // Last resort recovery - if logging itself fails
+        os_log_error(OS_LOG_DEFAULT,
+                     "ProjectX logging exception: %{public}@",
+                     exception.reason);
     }
 }
 

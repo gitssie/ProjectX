@@ -4,6 +4,7 @@
 #import <spawn.h>
 #import <sys/sysctl.h>
 #import <objc/runtime.h>
+#import "PXRootHidePath.h"
 
 // Forward declarations for private API
 extern int proc_listpids(uint32_t type, uint32_t typeinfo, void *buffer, int buffersize);
@@ -19,8 +20,6 @@ extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 static NSString * const kWeaponXGuardianKey = @"WeaponXGuardianActive";
 static NSString * const kWeaponXProcessIDs = @"WeaponXProcessIDs";
-static NSString * const kWeaponXDaemonPath = @"/var/jb/Library/WeaponX/WeaponXDaemon";
-static NSString * const kWeaponXLaunchDaemonPath = @"/var/jb/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist";
 
 @interface WeaponXGuardian : NSObject
 @property (nonatomic, strong) NSTimer *guardianTimer;
@@ -86,24 +85,28 @@ static NSString * const kWeaponXLaunchDaemonPath = @"/var/jb/Library/LaunchDaemo
 - (void)ensureDaemonIsRunning {
     // Check if daemon exists
     NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:kWeaponXDaemonPath]) {
-        NSLog(@"[WeaponX] ⚠️ Daemon executable not found at %@", kWeaponXDaemonPath);
+    NSString *daemonPath = PXWeaponXDaemonPath();
+    NSString *launchDaemonPath = PXWeaponXLaunchDaemonPath();
+    if (![fileManager fileExistsAtPath:daemonPath]) {
+        NSLog(@"[WeaponX] ⚠️ Daemon executable not found at %@", daemonPath);
         return;
     }
     
     // Check if LaunchDaemon plist exists
-    if (![fileManager fileExistsAtPath:kWeaponXLaunchDaemonPath]) {
-        NSLog(@"[WeaponX] ⚠️ LaunchDaemon plist not found at %@", kWeaponXLaunchDaemonPath);
+    if (![fileManager fileExistsAtPath:launchDaemonPath]) {
+        NSLog(@"[WeaponX] ⚠️ LaunchDaemon plist not found at %@", launchDaemonPath);
         return;
     }
     
     // Load the daemon using posix_spawn
     pid_t pid;
-    const char *launchctl = "/bin/launchctl";
+    NSString *launchctlPath = PXRootFSPath(@"/bin/launchctl");
+    const char *launchctl = [launchctlPath fileSystemRepresentation];
     const char *args[] = {
         launchctl,
-        "load",
-        [kWeaponXLaunchDaemonPath UTF8String],
+        "bootstrap",
+        "system",
+        [launchDaemonPath fileSystemRepresentation],
         NULL
     };
     
@@ -139,7 +142,7 @@ static NSString * const kWeaponXLaunchDaemonPath = @"/var/jb/Library/LaunchDaemo
         if (WIFEXITED(wait_status) && WEXITSTATUS(wait_status) == 0) {
             NSLog(@"[WeaponX] ✅ Successfully loaded daemon");
         } else {
-            NSLog(@"[WeaponX] ⚠️ Failed to load daemon, status: %d", WEXITSTATUS(wait_status));
+            NSLog(@"[WeaponX] ⚠️ Failed to load daemon, wait status: %d", wait_status);
         }
     } else {
         NSLog(@"[WeaponX] ⚠️ Failed to spawn launchctl process, error: %d", status);
@@ -354,10 +357,10 @@ static NSString * const kWeaponXLaunchDaemonPath = @"/var/jb/Library/LaunchDaemo
     
     if ([processName isEqualToString:@"ProjectX"]) {
         // Path to the ProjectX app
-        processPath = @"/var/jb/Applications/ProjectX.app/ProjectX";
+        processPath = [PXProjectXApplicationPath() stringByAppendingPathComponent:@"ProjectX"];
     } else if ([processName isEqualToString:@"WeaponXDaemon"]) {
         // Path to the daemon
-        processPath = @"/var/jb/Library/WeaponX/WeaponXDaemon";
+        processPath = PXWeaponXDaemonPath();
     }
     
     if (!processPath) {
@@ -430,7 +433,7 @@ static NSString * const kWeaponXLaunchDaemonPath = @"/var/jb/Library/LaunchDaemo
 
 - (void)createPersistentState {
     // Create a directory to store our persistent state
-    NSString *guardianDir = @"/var/jb/Library/WeaponX/Guardian";
+    NSString *guardianDir = PXGuardianDirectoryPath();
     NSFileManager *fileManager = [NSFileManager defaultManager];
     
     if (![fileManager fileExistsAtPath:guardianDir]) {
@@ -454,7 +457,7 @@ static NSString * const kWeaponXLaunchDaemonPath = @"/var/jb/Library/LaunchDaemo
 }
 
 - (void)updatePersistentState {
-    NSString *statePath = @"/var/jb/Library/WeaponX/Guardian/guardian.plist";
+    NSString *statePath = [PXGuardianDirectoryPath() stringByAppendingPathComponent:@"guardian.plist"];
     NSDictionary *state = @{
         @"active": @(_isGuardianActive),
         @"protectedProcesses": self.protectedProcesses,
@@ -482,7 +485,7 @@ static NSString * const kWeaponXLaunchDaemonPath = @"/var/jb/Library/LaunchDaemo
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
     // Update state with termination flag
-    NSString *statePath = @"/var/jb/Library/WeaponX/Guardian/guardian.plist";
+    NSString *statePath = [PXGuardianDirectoryPath() stringByAppendingPathComponent:@"guardian.plist"];
     NSDictionary *state = @{
         @"active": @(YES),
         @"needsRestart": @(YES),

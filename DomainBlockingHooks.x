@@ -8,11 +8,11 @@
 #import <WebKit/WebKit.h>
 #import <SafariServices/SafariServices.h>
 #import "ProjectXLogging.h"
+#import "PXRootHidePath.h"
+#import "PXProcessHookPolicy.h"
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+#define kScopedAppsPath PXGlobalScopePreferencesPath()
 
 // Scoped apps cache
 static NSMutableDictionary *scopedAppsCache = nil;
@@ -62,7 +62,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
+        NSArray *possiblePaths = @[kScopedAppsPath];
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *validPath = nil;
         
@@ -647,6 +647,9 @@ static int hooked_getnameinfo(const struct sockaddr *sa, socklen_t salen, char *
 
 %ctor {
     @autoreleasepool {
+        if (!PXCurrentProcessMayInstallApplicationHooks()) {
+            return;
+        }
         // Initialize cache
         scopedAppsCache = [NSMutableDictionary dictionary];
         

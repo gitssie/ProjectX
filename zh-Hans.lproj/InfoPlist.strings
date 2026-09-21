@@ -1,0 +1,3 @@
+"NSLocationWhenInUseUsageDescription" = "仅当您请求使用当前位置时，ProjectX 才会使用您的位置来移动智能位置图钉。";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "ProjectX 仅会将您的位置用于您明确启用的位置功能。";
+"LocationAccuracyUsageDescription" = "ProjectX 仅会使用精确位置来准确放置智能位置图钉。";

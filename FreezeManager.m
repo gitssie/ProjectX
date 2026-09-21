@@ -1,5 +1,6 @@
 #import "FreezeManager.h"
 #import "IdentifierManager.h"
+#import "PXRootHidePath.h"
 #import <spawn.h>
 #import <sys/wait.h>
 
@@ -169,26 +170,9 @@
         return;
     }
     
-    // Check for different killall paths based on jailbreak type
-    NSArray *killallPaths = @[
-        @"/var/jb/usr/bin/killall",              // Dopamine path
-        @"/usr/bin/killall",                     // Traditional/Palera1n path
-        @"/var/jb/bin/killall",                  // Alternative Dopamine path
-        @"/private/preboot/jb/usr/bin/killall"   // Additional Palera1n path
-    ];
+    NSString *killallPath = PXBootstrapCommandPath(@"killall");
     
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *killallPath = nil;
-    
-    // Find the first available killall binary
-    for (NSString *path in killallPaths) {
-        if ([fileManager fileExistsAtPath:path]) {
-            killallPath = path;
-            break;
-        }
-    }
-    
-    if (!killallPath) {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:killallPath]) {
         NSLog(@"[FreezeManager] Error: Could not find a valid killall binary path");
         return;
     }

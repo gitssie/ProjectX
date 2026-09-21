@@ -18,15 +18,16 @@
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" text="PROJECT X" textAlignment="center" lineBreakMode="tailTruncation" numberOfLines="1" translatesAutoresizingMaskIntoConstraints="NO" id="projectXLabel">
-                                <rect key="frame" x="96" y="326" width="200" height="50"/>
-                                <fontDescription key="fontDescription" type="system" weight="bold" pointSize="36"/>
-                            </label>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" image="LaunchMark" translatesAutoresizingMaskIntoConstraints="NO" id="launchMarkImageView">
+                                <rect key="frame" x="88.5" y="300" width="216" height="216"/>
+                            </imageView>
                         </subviews>
                         <color key="backgroundColor" systemColor="systemBackgroundColor"/>
                         <constraints>
-                            <constraint firstItem="projectXLabel" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="label-centerX"/>
-                            <constraint firstItem="projectXLabel" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" id="label-centerY"/>
+                            <constraint firstItem="launchMarkImageView" firstAttribute="width" constant="216" id="launch-mark-width"/>
+                            <constraint firstItem="launchMarkImageView" firstAttribute="height" constant="216" id="launch-mark-height"/>
+                            <constraint firstItem="launchMarkImageView" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="launch-mark-centerX"/>
+                            <constraint firstItem="launchMarkImageView" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" constant="-18" id="launch-mark-centerY"/>
                         </constraints>
                     </view>
                 </viewController>
@@ -36,9 +37,7 @@
         </scene>
     </scenes>
     <resources>
-        <systemColor name="labelColor">
-            <color red="0.0" green="0.0" blue="0.0" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-        </systemColor>
+        <image name="LaunchMark" width="256" height="256"/>
         <systemColor name="systemBackgroundColor">
             <color white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
         </systemColor>

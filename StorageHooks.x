@@ -3,7 +3,10 @@
 #import "StorageManager.h"
 #import "ProjectXLogging.h"
 #import "InlineHook.h"
+#import "PXRootHidePath.h"
+#import "PXProcessHookPolicy.h"
 #import <Foundation/Foundation.h>
+#import "AppIdentity.h"
 #import <sys/mount.h>
 #import <dlfcn.h>
 #import <ellekit/ellekit.h>
@@ -34,9 +37,7 @@
 #define DEFAULT_BLOCK_SIZE (4096ULL)
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+#define kScopedAppsPath PXGlobalScopePreferencesPath()
 
 // Scoped apps cache
 static NSMutableDictionary *scopedAppsCache = nil;
@@ -48,7 +49,7 @@ static CFTypeRef (*orig_IORegistryEntryCreateCFProperty)(io_registry_entry_t ent
 
 // Forward declarations
 static NSString *getCurrentBundleID(void);
-static NSDictionary *loadScopedApps(void);
+static NSDictionary *loadScopedApps(void) __attribute__((unused));
 static BOOL isInScopedAppsList(void);
 
 // Get the current bundle ID
@@ -81,7 +82,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
+        NSArray *possiblePaths = @[kScopedAppsPath];
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *validPath = nil;
         
@@ -133,25 +134,8 @@ static NSDictionary *loadScopedApps(void) {
 static BOOL isInScopedAppsList(void) {
     @try {
         NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        
-        // Check if this bundle ID is in the scoped apps dictionary
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        
-        // Check if the app is enabled
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-        
+        return bundleID.length > 0 &&
+            [[IdentifierManager sharedManager] shouldSpoofForBundle:bundleID];
     } @catch (NSException *e) {
         return NO;
     }
@@ -189,13 +173,13 @@ static NSDictionary *getStorageValues() {
     
     @try {
         // First try to get active profile ID
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+        NSString *profilesPath = PXCurrentProfileInfoPath();
         NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
         NSString *profileId = currentProfileInfo[@"ProfileId"];
         
         if (profileId) {
             // Build path to storage.plist for this profile
-            NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+            NSString *profileDir = PXProfileDirectoryPath(profileId);
             NSString *storagePath = [profileDir stringByAppendingPathComponent:@"storage.plist"];
             
             // Try to load values from storage.plist
@@ -327,6 +311,7 @@ static BOOL shouldApplyStorageSpoofing() {
     // Always exclude system processes and critical system apps
     if ([currentBundleID hasPrefix:@"com.apple."] && 
         ![currentBundleID isEqualToString:@"com.apple.mobilesafari"] &&
+        ![currentBundleID isEqualToString:@"com.apple.mobileslideshow"] &&
         ![currentBundleID isEqualToString:@"com.apple.webapp"]) {
         
         // Cache the negative decision with timestamp
@@ -763,7 +748,8 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
 %hook NSFileManager
 
 - (NSDictionary *)attributesOfFileSystemForPath:(NSString *)path error:(NSError **)error {
-    NSDictionary *originalAttributes = %orig;
+    NSString *realPath = [[PXAppIdentityRuntime sharedRuntime] translatedRealPathForPath:path];
+    NSDictionary *originalAttributes = %orig(realPath, error);
     
     if (!originalAttributes || !shouldApplyStorageSpoofing()) {
         return originalAttributes;
@@ -796,13 +782,16 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
 
 // Add new method for iOS 13+ support
 - (NSURL *)URLForDirectory:(NSSearchPathDirectory)directory inDomain:(NSSearchPathDomainMask)domain appropriateForURL:(NSURL *)url create:(BOOL)shouldCreate error:(NSError **)error {
-    NSURL *originalURL = %orig;
-    return originalURL;
+    PXAppIdentityRuntime *runtime = [PXAppIdentityRuntime sharedRuntime];
+    NSURL *realURL = [runtime translatedRealFileURLForURL:url];
+    NSURL *originalURL = %orig(directory, domain, realURL, shouldCreate, error);
+    return [runtime translatedObservableFileURLForURL:originalURL];
 }
 
 // Hook the direct volume capacity method added in iOS 11+
 - (unsigned long long)volumeAvailableCapacityForImportantUsageForURL:(NSURL *)url error:(NSError **)error {
-    unsigned long long originalCapacity = %orig;
+    NSURL *realURL = [[PXAppIdentityRuntime sharedRuntime] translatedRealFileURLForURL:url];
+    unsigned long long originalCapacity = %orig(realURL, error);
     
     if (!shouldApplyStorageSpoofing()) {
         return originalCapacity;
@@ -825,7 +814,8 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
 
 // Hook the direct total capacity method added in iOS 11+
 - (unsigned long long)volumeTotalCapacityForURL:(NSURL *)url error:(NSError **)error {
-    unsigned long long originalCapacity = %orig;
+    NSURL *realURL = [[PXAppIdentityRuntime sharedRuntime] translatedRealFileURLForURL:url];
+    unsigned long long originalCapacity = %orig(realURL, error);
     
     if (!shouldApplyStorageSpoofing()) {
         return originalCapacity;
@@ -848,7 +838,8 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
 
 // Add iOS 13+ method
 - (unsigned long long)volumeAvailableCapacityForOpportunisticUsageForURL:(NSURL *)url error:(NSError **)error {
-    unsigned long long originalCapacity = %orig;
+    NSURL *realURL = [[PXAppIdentityRuntime sharedRuntime] translatedRealFileURLForURL:url];
+    unsigned long long originalCapacity = %orig(realURL, error);
     
     if (!shouldApplyStorageSpoofing()) {
         return originalCapacity;
@@ -982,6 +973,9 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
 // Setup hooks - Use %ctor for constructor, runs when module loads
 %ctor {
     @autoreleasepool {
+        if (!PXCurrentProcessMayInstallApplicationHooks()) {
+            return;
+        }
         @try {
             PXLog(@"[StorageHooks] Initializing storage hooks");
             
@@ -989,14 +983,6 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
             
             // Skip if we can't get bundle ID
             if (!currentBundleID || [currentBundleID length] == 0) {
-                return;
-            }
-            
-            // Don't hook system processes and our own apps
-            if ([currentBundleID hasPrefix:@"com.apple."] || 
-                [currentBundleID isEqualToString:@"com.hydra.projectx"] || 
-                [currentBundleID isEqualToString:@"com.hydra.weaponx"]) {
-                PXLog(@"[StorageHooks] Not hooking system process: %@", currentBundleID);
                 return;
             }
             

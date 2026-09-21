@@ -5,6 +5,9 @@
 #import "IdentifierManager.h"
 #import "SystemUUIDManager.h"
 #import "DyldCacheUUIDManager.h"
+#import "PXRootHidePath.h"
+#import "PXProcessHookPolicy.h"
+#import "PXSysctlHookRouter.h"
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
 #import <mach-o/dyld_images.h>
@@ -12,30 +15,17 @@
 #import <ellekit/ellekit.h>
 #import <sys/sysctl.h>
 #import <pthread.h>
+#import <errno.h>
 
 // Macro for iOS version checking
 #define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v) ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] != NSOrderedAscending)
 
-// Global variables to track state
-static NSMutableDictionary *cachedBundleDecisions = nil;
-static NSTimeInterval kCacheValidityDuration = 600.0; // 10 minutes for better performance
-static dispatch_queue_t cacheQueue = nil; // Queue for thread-safe access to cache
-static BOOL isInitialized = NO;
-
-// Callback function for notifications that clear the cache
-static void clearCacheCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    // Clear cached decisions using the dispatch queue for thread safety
-    dispatch_async(cacheQueue, ^{
-        if (cachedBundleDecisions) {
-            [cachedBundleDecisions removeAllObjects];
-            PXLog(@"[WeaponX] 🧹 Cleared UUID hooks decision cache");
-        }
-    });
-}
-
 // Update the shouldSpoofForBundle function to directly check settings files
 static BOOL shouldSpoofForBundle(NSString *bundleID) {
     if (!bundleID) return NO;
+    return [[IdentifierManager sharedManager] shouldSpoofForBundle:bundleID];
+}
+#if 0
     
     // Skip system apps, the tweak itself, and system processes - more comprehensive filtering
     if ([bundleID hasPrefix:@"com.apple."] || 
@@ -108,12 +98,7 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
         // First check if the app is in the scoped apps list (enabled in the tweak)
         BOOL isAppEnabled = NO;
         
-        // Try rootless path first for settings
-        NSArray *preferencesLocations = @[
-            @"/var/jb/var/mobile/Library/Preferences",
-            @"/var/jb/private/var/mobile/Library/Preferences",
-            @"/var/mobile/Library/Preferences"
-        ];
+        NSArray *preferencesLocations = @[PXPreferencesDirectoryPath()];
         
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *scopedAppsFilePath = nil;
@@ -179,8 +164,8 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
             PXLog(@"[WeaponX] ⚠️ Could not find settings.plist file");
         }
         
-        // Only spoof if app is enabled AND at least one UUID feature is enabled
-        shouldSpoof = isAppEnabled && (systemBootUUIDEnabled || dyldCacheUUIDEnabled);
+        // Every enabled scoped app receives the active virtual runtime session.
+        shouldSpoof = isAppEnabled;
         
         if (shouldSpoof) {
             PXLog(@"[WeaponX] ✅ UUID spoofing enabled for %@", bundleID);
@@ -205,45 +190,17 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
     }
     
     return shouldSpoof;
-}
+#endif
 
 // Direct check for SystemBootUUID being enabled
 static BOOL isSystemBootUUIDEnabled() {
-    // Check settings file directly
-    NSArray *preferencesLocations = @[
-        @"/var/jb/var/mobile/Library/Preferences",
-        @"/var/jb/private/var/mobile/Library/Preferences",
-        @"/var/mobile/Library/Preferences"
-    ];
-    
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    for (NSString *prefsPath in preferencesLocations) {
-        NSString *settingsPath = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-        if ([fileManager fileExistsAtPath:settingsPath]) {
-            NSDictionary *settingsDict = [NSDictionary dictionaryWithContentsOfFile:settingsPath];
-            NSDictionary *enabledIdentifiers = settingsDict[@"EnabledIdentifiers"];
-            
-            if (enabledIdentifiers) {
-                BOOL isEnabled = [enabledIdentifiers[@"SystemBootUUID"] boolValue];
-                PXLog(@"[WeaponX] 🔍 SystemBootUUID enabled status from plist: %@", isEnabled ? @"YES" : @"NO");
-                return isEnabled;
-            }
-        }
-    }
-    
-    PXLog(@"[WeaponX] ⚠️ Could not find settings.plist file, assuming SystemBootUUID is disabled");
-    return NO;
+    return YES;
 }
 
 // Direct check for DyldCacheUUID being enabled
 static BOOL isDyldCacheUUIDEnabled() {
     // Check settings file directly
-    NSArray *preferencesLocations = @[
-        @"/var/jb/var/mobile/Library/Preferences",
-        @"/var/jb/private/var/mobile/Library/Preferences",
-        @"/var/mobile/Library/Preferences"
-    ];
+    NSArray *preferencesLocations = @[PXPreferencesDirectoryPath()];
     
     NSFileManager *fileManager = [NSFileManager defaultManager];
     
@@ -268,35 +225,16 @@ static BOOL isDyldCacheUUIDEnabled() {
 // Add functions to get spoofed UUIDs from managers
 static NSString *getSpoofedSystemBootUUID() {
     @try {
-        // Use the SystemUUIDManager for consistent values across the app and hooks
         SystemUUIDManager *manager = [SystemUUIDManager sharedManager];
-        if (!manager) {
-            // Generate a safer fallback if manager is unavailable
-            return [[NSUUID UUID] UUIDString];
-        }
-        
-        NSString *uuid = [manager currentBootUUID];
-        
-        // Validate UUID format
-        if (uuid && uuid.length > 0 && ![uuid isEqualToString:@"(null)"]) {
-            // Check if it's a valid UUID format (basic validation)
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
-                                                                                    options:NSRegularExpressionCaseInsensitive 
-                                                                                      error:nil];
-            if ([regex numberOfMatchesInString:uuid 
-                                       options:0 
-                                         range:NSMakeRange(0, uuid.length)] > 0) {
-                return uuid;
-            }
-        }
+        NSString *uuid = nil;
         
         // Try to read directly from plist files
         IdentifierManager *idManager = [NSClassFromString(@"IdentifierManager") sharedManager];
         if (!idManager) {
-            return [[NSUUID UUID] UUIDString];
+            return @"00000000-0000-4000-8000-000000000000";
         }
         
-        NSString *identityDir = [idManager valueForKey:@"profileIdentityPath"];
+        NSString *identityDir = [idManager profileIdentityPath];
         
         if (identityDir) {
             // First try the combined device_ids.plist
@@ -343,9 +281,9 @@ static NSString *getSpoofedSystemBootUUID() {
             }
         }
         
-        // If we still don't have a UUID, generate a new one rather than using zeros
-        uuid = [[NSUUID UUID] UUIDString];
-        PXLog(@"[WeaponX] 🔄 Generated fallback UUID: %@", uuid);
+        // Fail closed with a non-host UUID if the active session is unavailable.
+        uuid = @"00000000-0000-4000-8000-000000000000";
+        PXLog(@"[WeaponX] ⚠️ Active virtual Boot UUID unavailable; using host-safe sentinel");
         
         // Store this for future consistency
         if ([manager respondsToSelector:@selector(setCurrentBootUUID:)]) {
@@ -355,7 +293,7 @@ static NSString *getSpoofedSystemBootUUID() {
         return uuid;
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in getSpoofedSystemBootUUID: %@", exception);
-        return [[NSUUID UUID] UUIDString];
+        return @"00000000-0000-4000-8000-000000000000";
     }
 }
 
@@ -453,6 +391,10 @@ static NSString *getSpoofedDyldCacheUUID() {
 }
 
 #pragma mark - NSUUID Hooks
+
+// Generic UUID creation/stringification is not a Boot UUID API. Keep these legacy hooks inactive
+// so IDFA/IDFV and application-generated UUIDs remain independent of the virtual runtime session.
+%group LegacyGenericUUIDInterception
 
 %hook NSUUID
 
@@ -650,6 +592,8 @@ static NSString *getSpoofedDyldCacheUUID() {
 }
 
 %end
+
+%end // LegacyGenericUUIDInterception
 
 #pragma mark - IOKit Platform UUID Hooks
 
@@ -949,27 +893,30 @@ static int (*orig_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, v
 
 static int replaced_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     @try {
-        // Check if we're looking for kern.uuid
-        if (name && strcmp(name, "kern.uuid") == 0) {
+        // Boot/session UUID aliases all resolve to the same persisted virtual session UUID.
+        if (name && (strcmp(name, "kern.uuid") == 0 ||
+                     strcmp(name, "kern.bootuuid") == 0 ||
+                     strcmp(name, "kern.bootsessionuuid") == 0)) {
             NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
             
             if (shouldSpoofForBundle(bundleID) && isSystemBootUUIDEnabled()) {
                 NSString *bootUUID = getSpoofedSystemBootUUID();
-                if (bootUUID && bootUUID.length > 0 && oldp && oldlenp) {
-                    // Convert the UUID string to bytes
-                    NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
-                    if (uuid) {
-                        uuid_t bytes;
-                        [uuid getUUIDBytes:bytes];
-                        
-                        // Copy as much as will fit
-                        size_t toCopy = MIN(*oldlenp, sizeof(uuid_t));
-                        memcpy(oldp, bytes, toCopy);
-                        *oldlenp = toCopy;
-                        
-                        PXLog(@"[WeaponX] 🔄 Spoofing sysctlbyname(kern.uuid) with: %@", bootUUID);
-                        return 0; // Success
+                if (bootUUID.length > 0 && oldlenp) {
+                    const char *uuidCString = bootUUID.UTF8String;
+                    size_t requiredLength = strlen(uuidCString) + 1;
+                    if (!oldp) {
+                        *oldlenp = requiredLength;
+                        return 0;
                     }
+                    if (*oldlenp < requiredLength) {
+                        *oldlenp = requiredLength;
+                        errno = ENOMEM;
+                        return -1;
+                    }
+                    memcpy(oldp, uuidCString, requiredLength);
+                    *oldlenp = requiredLength;
+                    PXLog(@"[WeaponX] 🔄 Spoofing sysctlbyname(%s) with: %@", name, bootUUID);
+                    return 0;
                 }
             }
         }
@@ -981,49 +928,19 @@ static int replaced_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, 
     return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
 }
 
-// Hook CFUUIDCreate to also catch CF-level UUID creation
-static CFUUIDRef (*orig_CFUUIDCreate)(CFAllocatorRef alloc);
-
-static CFUUIDRef replaced_CFUUIDCreate(CFAllocatorRef alloc) {
-    CFUUIDRef originalUUID = orig_CFUUIDCreate ? orig_CFUUIDCreate(alloc) : NULL;
-    
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        // Only hook for system UUID if we shouldn't spoof for this app or UUID spoofing is disabled
-        if (!shouldSpoofForBundle(bundleID) || !isSystemBootUUIDEnabled()) {
-            return originalUUID;
-        }
-        
-        // Convert UUID to string for logging and comparison
-        NSString *originalUUIDString = nil;
-        if (originalUUID) {
-            CFStringRef uuidStringRef = CFUUIDCreateString(kCFAllocatorDefault, originalUUID);
-            if (uuidStringRef) {
-                originalUUIDString = (__bridge_transfer NSString *)uuidStringRef;
-            }
-        }
-        
-        // Get spoofed UUID
-        NSString *bootUUID = getSpoofedSystemBootUUID();
-        if (bootUUID && bootUUID.length > 0) {
-            // Create a new UUID from our spoofed string
-            CFUUIDRef spoofedUUID = CFUUIDCreateFromString(kCFAllocatorDefault, (__bridge CFStringRef)bootUUID);
-            if (spoofedUUID) {
-                // Release the original UUID
-                if (originalUUID) {
-                    CFRelease(originalUUID);
-                }
-                
-                PXLog(@"[WeaponX] 🔄 Spoofing CFUUIDCreate from %@ to %@", originalUUIDString ?: @"nil", bootUUID);
-                return spoofedUUID;
-            }
-        }
-    } @catch (NSException *exception) {
-        PXLog(@"[WeaponX] ❌ Exception in replaced_CFUUIDCreate: %@", exception);
+static BOOL PXUUIDSysctlByNameHandler(const char *name,
+                                      void *oldp,
+                                      size_t *oldlenp,
+                                      void *newp,
+                                      size_t newlen,
+                                      int *result) {
+    if (!name || (strcmp(name, "kern.uuid") != 0 &&
+                  strcmp(name, "kern.bootuuid") != 0 &&
+                  strcmp(name, "kern.bootsessionuuid") != 0)) {
+        return NO;
     }
-    
-    return originalUUID;
+    *result = replaced_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+    return YES;
 }
 
 #pragma mark - Constructor - Additional Hooks Setup
@@ -1048,20 +965,9 @@ static void setupAdditionalSystemUUIDHooks() {
                 PXLog(@"[WeaponX] ⚠️ Could not find gethostuuid symbol");
             }
             
-            // Hook sysctlbyname
-            void *sysctlbyname_sym = dlsym(libc, "sysctlbyname");
-            if (sysctlbyname_sym) {
-                int result = EKHook(sysctlbyname_sym, 
-                                  (void *)replaced_sysctlbyname, 
-                                  (void **)&orig_sysctlbyname);
-                
-                if (result == 0) {
-                    PXLog(@"[WeaponX] ✅ Successfully hooked sysctlbyname");
-                } else {
-                    PXLog(@"[WeaponX] ⚠️ Failed to hook sysctlbyname: %d", result);
-                }
-            } else {
-                PXLog(@"[WeaponX] ⚠️ Could not find sysctlbyname symbol");
+            orig_sysctlbyname = PXCallOriginalSysctlByName;
+            if (!PXRegisterSysctlByNameHandler(PXUUIDSysctlByNameHandler)) {
+                PXLog(@"[WeaponX] ⚠️ Failed to register boot UUID sysctl handler");
             }
             
             dlclose(libc);
@@ -1069,28 +975,6 @@ static void setupAdditionalSystemUUIDHooks() {
             PXLog(@"[WeaponX] ⚠️ Failed to open libSystem.B.dylib");
         }
         
-        // Hook CFUUIDCreate
-        void *coreFoundation = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_NOW);
-        if (coreFoundation) {
-            void *cfuuidcreate_sym = dlsym(coreFoundation, "CFUUIDCreate");
-            if (cfuuidcreate_sym) {
-                int result = EKHook(cfuuidcreate_sym, 
-                                  (void *)replaced_CFUUIDCreate, 
-                                  (void **)&orig_CFUUIDCreate);
-                
-                if (result == 0) {
-                    PXLog(@"[WeaponX] ✅ Successfully hooked CFUUIDCreate");
-                } else {
-                    PXLog(@"[WeaponX] ⚠️ Failed to hook CFUUIDCreate: %d", result);
-                }
-            } else {
-                PXLog(@"[WeaponX] ⚠️ Could not find CFUUIDCreate symbol");
-            }
-            
-            dlclose(coreFoundation);
-        } else {
-            PXLog(@"[WeaponX] ⚠️ Failed to open CoreFoundation framework");
-        }
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in setupAdditionalSystemUUIDHooks: %@", exception);
     }
@@ -1099,6 +983,15 @@ static void setupAdditionalSystemUUIDHooks() {
 // Update constructor to initialize the additional hooks
 %ctor {
     @autoreleasepool {
+        if (!PXCurrentProcessMayInstallApplicationHooks()) {
+            return;
+        }
+        %init;
+        NSUserDefaults *legacyUUIDSettings = [[NSUserDefaults alloc]
+            initWithSuiteName:@"com.weaponx.securitySettings"];
+        if ([legacyUUIDSettings boolForKey:@"legacyGenericUUIDInterceptionEnabled"]) {
+            %init(LegacyGenericUUIDInterception);
+        }
         // Delay hook initialization to ensure everything is properly set up
         // This helps avoid early hooking that might cause crashes
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -1110,13 +1003,11 @@ static void setupAdditionalSystemUUIDHooks() {
             // Skip for critical system processes to prevent crashes
             // More comprehensive check than before to ensure stability
             if (!bundleID || 
-                [bundleID hasPrefix:@"com.apple."] || 
                 [processName isEqualToString:@"SpringBoard"] ||
                 [processName isEqualToString:@"backboardd"] ||
                 [processName isEqualToString:@"assertiond"] ||
                 [processName isEqualToString:@"useractivityd"] ||
                 [processName isEqualToString:@"apsd"] ||
-                [processName hasPrefix:@"com.apple."] ||
                 [processName containsString:@"daemon"] ||
                 [processName containsString:@"assistant"] ||
                 [processName containsString:@"locationd"] ||
@@ -1160,22 +1051,6 @@ static void setupAdditionalSystemUUIDHooks() {
             }
             
             // If we get here, the app is configured for spoofing, so we can initialize the hooks
-            
-            // Check iOS version to apply different handling for iOS 18+
-            NSOperatingSystemVersion ios18 = {18, 0, 0};
-            BOOL isIOS18OrNewer = [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:ios18];
-            
-            if (isIOS18OrNewer) {
-                // Adjust cache validity duration for better performance on newer iOS
-                kCacheValidityDuration = 300.0; // 5 minutes for iOS 18+
-                PXLog(@"[WeaponX] ⚙️ Using adjusted cache settings for iOS 18+");
-            }
-            
-            // Initialize cache queue with better naming for debugging
-            cacheQueue = dispatch_queue_create("com.hydra.projectx.uuidcache", DISPATCH_QUEUE_SERIAL);
-            
-            // Initialize cache dictionary
-            cachedBundleDecisions = [NSMutableDictionary dictionary];
             
             PXLog(@"[WeaponX] 🚀 Initializing UUID hooks for app: %@ (%@)", bundleID, processName);
             
@@ -1257,26 +1132,6 @@ static void setupAdditionalSystemUUIDHooks() {
                 PXLog(@"[WeaponX] ❌ Exception in UUID hooks setup: %@", exception);
             }
             
-            // Register for settings change notifications
-            CFNotificationCenterAddObserver(
-                CFNotificationCenterGetDarwinNotifyCenter(),
-                NULL,
-                clearCacheCallback,
-                CFSTR("com.hydra.projectx.settings.changed"),
-                NULL,
-                CFNotificationSuspensionBehaviorDeliverImmediately
-            );
-            
-            // Register for profile change notifications
-            CFNotificationCenterAddObserver(
-                CFNotificationCenterGetDarwinNotifyCenter(),
-                NULL,
-                clearCacheCallback,
-                CFSTR("com.hydra.projectx.profileChanged"),
-                NULL,
-                CFNotificationSuspensionBehaviorDeliverImmediately
-            );
-            
             PXLog(@"[WeaponX] ✅ UUID hooks initialization complete for %@", bundleID);
             
             // Add after initializing hooks for _dyld_get_shared_cache_uuid and _dyld_get_all_image_infos
@@ -1290,4 +1145,4 @@ static void setupAdditionalSystemUUIDHooks() {
             }
         });
     }
-} 
+}

@@ -4,11 +4,11 @@
 #import <ellekit/ellekit.h>
 #import "BatteryManager.h"
 #import "IdentifierManager.h"
+#import "PXRootHidePath.h"
+#import "PXProcessHookPolicy.h"
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+#define kScopedAppsPath PXGlobalScopePreferencesPath()
 
 // Scoped apps cache
 static NSMutableDictionary *scopedAppsCache = nil;
@@ -33,6 +33,7 @@ static NSString *getCurrentBundleID(void) {
 }
 
 // Helper: load scoped apps from plist (with cache)
+static NSDictionary *loadScopedApps(void) __attribute__((unused));
 static NSDictionary *loadScopedApps(void) {
     @try {
         if (scopedAppsCache && scopedAppsCacheTimestamp &&
@@ -44,7 +45,7 @@ static NSDictionary *loadScopedApps(void) {
         } else {
             [scopedAppsCache removeAllObjects];
         }
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
+        NSArray *possiblePaths = @[kScopedAppsPath];
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *validPath = nil;
         for (NSString *path in possiblePaths) {
@@ -80,19 +81,8 @@ static NSDictionary *loadScopedApps(void) {
 static BOOL isInScopedAppsList(void) {
     @try {
         NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
+        return bundleID.length > 0 &&
+            [[IdentifierManager sharedManager] shouldSpoofForBundle:bundleID];
     } @catch (NSException *e) {
         return NO;
     }
@@ -160,7 +150,7 @@ static BOOL isBatterySpoofingEnabled(void) {
 static NSString *getProfileBatteryLevel(void) {
     @try {
         // Get current profile ID
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+        NSString *profilesPath = PXCurrentProfileInfoPath();
         NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
         if (!currentProfileInfo) {
             return nil;
@@ -169,7 +159,7 @@ static NSString *getProfileBatteryLevel(void) {
         if (!profileId) {
             return nil;
         }
-        NSString *identityDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+        NSString *identityDir = PXProfileDirectoryPath(profileId);
         NSString *batteryInfoPath = [identityDir stringByAppendingPathComponent:@"battery_info.plist"];
         NSDictionary *batteryInfo = [NSDictionary dictionaryWithContentsOfFile:batteryInfoPath];
         if (!batteryInfo) {
@@ -213,6 +203,9 @@ static NSInteger hook_batteryState(UIDevice *self, SEL _cmd) {
 
 %ctor {
     @autoreleasepool {
+        if (!PXCurrentProcessMayInstallApplicationHooks()) {
+            return;
+        }
         Class deviceClass = objc_getClass("UIDevice");
         if (deviceClass) {
             MSHookMessageEx(deviceClass, @selector(batteryLevel), (IMP)hook_batteryLevel, (IMP *)&orig_batteryLevel);

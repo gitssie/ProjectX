@@ -2,6 +2,7 @@
 #import "APIManager.h"
 #import "SecureTimeManager.h"
 #import "TokenManager.h"
+#import "PXRootHidePath.h"
 #import <UIKit/UIKit.h>
 #import <IOKit/IOKitLib.h>
 #import <sys/utsname.h>
@@ -2494,22 +2495,16 @@
     // For Dopamine 2 on iOS 15, we'll use a direct approach
     // Simply use posix_spawn to call uicache to refresh the app
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        // Check for Dopamine 2 specifics - the rootless jailbreak path
         const char *executable_str = [executableName UTF8String];
-        
-        // First check the Dopamine rootless path
-        if ([[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb/usr/bin/killall"]) {
-            // On Dopamine 2, use the rootless paths
+        NSString *killallPath = PXBootstrapCommandPath(@"killall");
+
+        if ([[NSFileManager defaultManager] fileExistsAtPath:killallPath]) {
             pid_t pid;
-            const char *killall_path = "/var/jb/usr/bin/killall";
+            const char *killall_path = [killallPath fileSystemRepresentation];
             char *const argv[] = {(char *)"killall", (char *)"-9", (char *)executable_str, NULL};
             posix_spawn(&pid, killall_path, NULL, NULL, argv, NULL);
         } else {
-            // Standard jailbreak path
-            pid_t pid;
-            const char *killall_path = "/usr/bin/killall";
-            char *const argv[] = {(char *)"killall", (char *)"-9", (char *)executable_str, NULL};
-            posix_spawn(&pid, killall_path, NULL, NULL, argv, NULL);
+            NSLog(@"[WeaponX] killall not found at RootHide path: %@", killallPath);
         }
         
         // Try to tell the OS to restart our application with openURL

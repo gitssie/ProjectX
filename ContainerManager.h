@@ -24,7 +24,7 @@
 // Gets the current profile ID
 - (NSString *)currentProfileID;
 
-// Translates a path for the current environment (rootful or rootless)
+// Translates a real iOS filesystem path into the RootHide bootstrap namespace.
 + (NSString *)translatePathForEnvironment:(NSString *)path;
 
 // System app detection

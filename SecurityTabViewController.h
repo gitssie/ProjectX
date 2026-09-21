@@ -1,5 +1,7 @@
 #import "UIKit/UIKit.h"
 
+@class PXTrustedCarrierOption;
+
 @interface MatrixRainView : UIView
 - (void)startAnimation;
 - (void)stopAnimation;
@@ -52,10 +54,15 @@
 // Network connection type control
 @property (nonatomic, strong) UILabel *networkConnectionTypeLabel;
 @property (nonatomic, strong) UISegmentedControl *networkConnectionTypeSegment;
-@property (nonatomic, strong) UISegmentedControl *networkISOCountrySegment;
 @property (nonatomic, strong) UIButton *networkConnectionTypeInfoButton;
-@property (nonatomic, strong) UIButton *customISOButton;
-@property (nonatomic, strong) UIButton *quickGenerateButton;
+
+// Trusted carrier selection and generated carrier status
+@property (nonatomic, strong) UIButton *trustedCarriersButton;
+@property (nonatomic, strong) UILabel *trustedCarriersSummaryLabel;
+@property (nonatomic, strong) UILabel *generatedCarrierStatusLabel;
+@property (nonatomic, strong) UIView *carrierSelectionContainer;
+@property (nonatomic, copy) NSArray<PXTrustedCarrierOption *> *trustedCarrierOptions;
+@property (nonatomic, copy) NSSet<NSString *> *selectedTrustedCarrierIDs;
 
 // Device specific spoofing control
 @property (nonatomic, strong) UILabel *deviceSpoofingLabel;
@@ -76,12 +83,6 @@
 // IP display label
 @property (nonatomic, strong) UILabel *ipLabel;
 @property (nonatomic, strong) UILabel *locationLabel;
-
-// Carrier details properties
-@property (nonatomic, strong) UITextField *carrierNameField;
-@property (nonatomic, strong) UITextField *mccField;
-@property (nonatomic, strong) UITextField *mncField;
-@property (nonatomic, strong) UIView *carrierDetailsContainer;
 
 // WiFi local IP address
 @property (nonatomic, strong) UIView *localIPContainer;

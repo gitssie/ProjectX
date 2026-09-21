@@ -4,6 +4,10 @@
 #import <objc/message.h>
 #import "ProjectXLogging.h"
 #import "IOSVersionInfo.h"
+#import "PXRootHidePath.h"
+#import "PXProcessHookPolicy.h"
+#import "PXSysctlHookRouter.h"
+#import "IdentifierManager.h"
 #import <WebKit/WebKit.h>
 #import <sys/sysctl.h>
 #import <dlfcn.h>
@@ -11,9 +15,7 @@
 #import <mach/mach_time.h>
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+#define kScopedAppsPath PXGlobalScopePreferencesPath()
 
 // Scoped apps cache
 static NSMutableDictionary *scopedAppsCache = nil;
@@ -33,7 +35,7 @@ static const NSTimeInterval kScopedAppsCacheValidDuration = 60.0; // 1 minute
 
 // Forward declarations
 static NSString *getCurrentBundleID(void);
-static NSDictionary *loadScopedApps(void);
+static NSDictionary *loadScopedApps(void) __attribute__((unused));
 static BOOL isInScopedAppsList(void);
 static BOOL isCriticalSystemProcess(NSString *bundleID);
 static void modifyUserAgentString(NSString **userAgentString, NSString *originalVersion, NSString *spoofedVersion);
@@ -71,7 +73,6 @@ static CFDictionaryRef cachedDictResult = NULL;
 
 // SystemVersion.plist path constants
 #define SYSTEM_VERSION_PATH @"/System/Library/CoreServices/SystemVersion.plist"
-#define ROOTLESS_SYSTEM_VERSION_PATH @"/var/jb/System/Library/CoreServices/SystemVersion.plist"
 
 #pragma mark - Helper Functions
 
@@ -105,7 +106,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
+        NSArray *possiblePaths = @[kScopedAppsPath];
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *validPath = nil;
         
@@ -157,25 +158,8 @@ static NSDictionary *loadScopedApps(void) {
 static BOOL isInScopedAppsList(void) {
     @try {
         NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        
-        // Check if this bundle ID is in the scoped apps dictionary
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        
-        // Check if the app is enabled
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-        
+        return bundleID.length > 0 &&
+            [[IdentifierManager sharedManager] shouldSpoofForBundle:bundleID];
     } @catch (NSException *e) {
         return NO;
     }
@@ -272,12 +256,7 @@ static NSDictionary *getIOSVersionInfo() {
     // Read version value directly from profile files
     NSString *formattedVersion = nil;
     
-    // Try to get the current profile directory
-    NSArray *possibleProfilePaths = @[
-        @"/var/jb/var/mobile/Library/WeaponX/Profiles",
-        @"/var/jb/private/var/mobile/Library/WeaponX/Profiles", 
-        @"/var/mobile/Library/WeaponX/Profiles"
-    ];
+    NSArray *possibleProfilePaths = @[PXProfilesDirectoryPath()];
     
     NSFileManager *fileManager = [NSFileManager defaultManager];
     for (NSString *profileBasePath in possibleProfilePaths) {
@@ -1117,43 +1096,30 @@ CFDictionaryRef replaced_CFCopySystemVersionDictionary(void) {
 int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     // Store last call time and cached result for the common kernel version calls
     static uint64_t lastOsVersionCallTime = 0;
-    static char cachedBuildStr[32] = {0}; // Cache the build string
-    static size_t cachedBuildStrLen = 0;
+    char cachedBuildStr[32] = {0};
+    size_t cachedBuildStrLen = 0;
     
     // For kern.version - full Darwin kernel version string
     static uint64_t lastKernVersionCallTime = 0;
-    static char cachedKernelVersionStr[256] = {0}; // Cache the kernel version string
-    static size_t cachedKernelVersionStrLen = 0;
+    char cachedKernelVersionStr[256] = {0};
+    size_t cachedKernelVersionStrLen = 0;
     
     @try {
-        // Pre-cache version info only once
-        static NSDictionary *cachedVersionInfo = nil;
-        static dispatch_once_t onceToken;
-        dispatch_once(&onceToken, ^{
-            cachedVersionInfo = getIOSVersionInfo();
-            if (cachedVersionInfo) {
-                // Extract build number and cache it
-                NSString *buildNumber = cachedVersionInfo[@"build"];
-                if (buildNumber) {
-                    strlcpy(cachedBuildStr, [buildNumber UTF8String], sizeof(cachedBuildStr));
-                    cachedBuildStrLen = strlen(cachedBuildStr) + 1; // +1 for null terminator
-                }
-                
-                // Extract kernel version string and cache it
-                NSString *kernelVersion = cachedVersionInfo[@"kernel_version"];
-                if (kernelVersion) {
-                    strlcpy(cachedKernelVersionStr, [kernelVersion UTF8String], sizeof(cachedKernelVersionStr));
-                    cachedKernelVersionStrLen = strlen(cachedKernelVersionStr) + 1; // +1 for null terminator
-                }
-                
-                IOSVERSION_LOG(@"🔄 Pre-cached version info: %@ (%@), kernel: %@", 
-                      cachedVersionInfo[@"version"], 
-                      cachedVersionInfo[@"build"],
-                      cachedVersionInfo[@"kernel_version"]);
-            } else {
-                IOSVERSION_LOG(@"⚠️ Failed to pre-cache version info");
-            }
-        });
+        // getIOSVersionInfo owns the short-lived profile cache and is explicitly
+        // invalidated by settingsChanged. Do not keep a dispatch_once snapshot:
+        // it would leak the previous environment into the next profile.
+        NSDictionary *cachedVersionInfo = getIOSVersionInfo();
+        NSString *buildNumber = cachedVersionInfo[@"build"];
+        if (buildNumber.length > 0) {
+            strlcpy(cachedBuildStr, buildNumber.UTF8String, sizeof(cachedBuildStr));
+            cachedBuildStrLen = strlen(cachedBuildStr) + 1;
+        }
+        NSString *kernelVersion = cachedVersionInfo[@"kernel_version"];
+        if (kernelVersion.length > 0) {
+            strlcpy(cachedKernelVersionStr, kernelVersion.UTF8String,
+                    sizeof(cachedKernelVersionStr));
+            cachedKernelVersionStrLen = strlen(cachedKernelVersionStr) + 1;
+        }
 
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         if (shouldSpoofForBundle(bundleID)) {
@@ -1310,6 +1276,21 @@ int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
     return original_sysctlbyname(name, oldp, oldlenp, newp, newlen);
 }
 
+static BOOL PXIOSVersionSysctlByNameHandler(const char *name,
+                                            void *oldp,
+                                            size_t *oldlenp,
+                                            void *newp,
+                                            size_t newlen,
+                                            int *result) {
+    if (!name || (strcmp(name, "kern.version") != 0 &&
+                  strcmp(name, "kern.osrelease") != 0 &&
+                  strcmp(name, "kern.osversion") != 0)) {
+        return NO;
+    }
+    *result = hooked_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+    return YES;
+}
+
 #pragma mark - Bundle Version Hooks
 
 %hook NSBundle
@@ -1427,6 +1408,7 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
         // Allow spoofing for Safari and WebKit processes, even though they're in the critical list
         // This is necessary to spoof browser user agents
         if ([bundleID isEqualToString:@"com.apple.mobilesafari"] ||
+            [bundleID isEqualToString:@"com.apple.mobileslideshow"] ||
             [bundleID isEqualToString:@"com.apple.WebKit"] ||
             [bundleID isEqualToString:@"com.apple.WebKit.WebContent"] ||
             [bundleID isEqualToString:@"com.apple.WebKit.Networking"]) {
@@ -1439,6 +1421,7 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
     if ([bundleID hasPrefix:@"com.apple."]) {
         // Allow spoofing for Safari and WebKit processes
         if ([bundleID isEqualToString:@"com.apple.mobilesafari"] ||
+            [bundleID isEqualToString:@"com.apple.mobileslideshow"] ||
             [bundleID hasPrefix:@"com.apple.WebKit"]) {
             return NO;
         }
@@ -1474,6 +1457,9 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
 
 %ctor {
     @autoreleasepool {
+        if (!PXCurrentProcessMayInstallApplicationHooks()) {
+            return;
+        }
         // Get the bundle ID for scope checking
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
@@ -1593,18 +1579,9 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
             IOSVERSION_LOG(@"⚠️ Failed to open CoreFoundation framework");
         }
         
-        // Hook sysctlbyname for kernel version checks
-        void *libSystemHandle = dlopen("/usr/lib/libSystem.B.dylib", RTLD_NOW);
-        if (libSystemHandle) {
-            void *sysctlbynamePtr = dlsym(libSystemHandle, "sysctlbyname");
-            if (sysctlbynamePtr) {
-                EKHook(sysctlbynamePtr, (void *)hooked_sysctlbyname, (void **)&original_sysctlbyname);
-                IOSVERSION_LOG(@"Hooked sysctlbyname");
-            } else {
-                IOSVERSION_LOG(@"⚠️ Failed to find sysctlbyname symbol");
-            }
-        } else {
-            IOSVERSION_LOG(@"⚠️ Failed to open libSystem.B.dylib");
+        original_sysctlbyname = PXCallOriginalSysctlByName;
+        if (!PXRegisterSysctlByNameHandler(PXIOSVersionSysctlByNameHandler)) {
+            IOSVERSION_LOG(@"⚠️ Failed to register iOS-version sysctl handler");
         }
         
         // Set up hooks for direct file access methods to catch SystemVersion.plist reads
@@ -1661,8 +1638,7 @@ static BOOL isSystemVersionFile(NSString *path) {
     
     // Normalize path before comparing
     path = [path stringByStandardizingPath];
-    return [path isEqualToString:SYSTEM_VERSION_PATH] || 
-           [path isEqualToString:ROOTLESS_SYSTEM_VERSION_PATH] ||
+    return [path isEqualToString:SYSTEM_VERSION_PATH] ||
            [path hasSuffix:@"SystemVersion.plist"];
 }
 

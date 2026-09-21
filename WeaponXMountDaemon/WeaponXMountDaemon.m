@@ -5,6 +5,7 @@
 #import <dispatch/dispatch.h>
 #import <spawn.h>
 #import <sys/wait.h>
+#import "../PXRootHidePath.h"
 
 // Declare the environ variable for posix_spawn
 extern char **environ;
@@ -253,8 +254,9 @@ static int fs_snapshot_mount(const char *volume, const char *mount_path, const c
     char *args[5]; // Maximum 5 arguments: command, -r flag, source, target, NULL terminator
     int argIndex = 0;
     
-    // Path to the mount_bindfs command
-    const char *binPath = "/var/jb/usr/bin/mount_bindfs";
+    // Resolve the bootstrap command through RootHide before spawning it.
+    NSString *mountBindFSPath = PXBootstrapCommandPath(@"mount_bindfs");
+    const char *binPath = [mountBindFSPath fileSystemRepresentation];
     args[argIndex++] = (char *)binPath;
     
     // Add -r flag if read-only

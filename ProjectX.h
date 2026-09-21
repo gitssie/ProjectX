@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import "ProjectXViewController.h"
 
 @interface IdentifierManager : NSObject
 
@@ -25,6 +26,9 @@
 - (NSString *)generateBootTime;
 - (NSString *)generateDeviceModel;
 - (void)regenerateAllEnabledIdentifiers;
+- (BOOL)regenerateAllEnabledIdentifiersWithError:(NSError **)error;
+- (BOOL)regenerateProfileAtIdentityDirectory:(NSString *)identityDirectory error:(NSError **)error;
+- (void)publishProfileGenerationNotifications;
 
 // Settings Management
 - (void)setIdentifierEnabled:(BOOL)enabled forType:(NSString *)type;
@@ -42,7 +46,7 @@
 
 @end
 
-@interface ProjectXViewController : UIViewController
+@interface ProjectXViewController (ProjectXCompatibility)
 
 @property (nonatomic, strong) IdentifierManager *manager;
 

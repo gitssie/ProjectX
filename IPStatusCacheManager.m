@@ -1,24 +1,15 @@
 // IPStatusCacheManager.m
 #import "IPStatusCacheManager.h"
 #import "ProjectXLogging.h"
+#import "PXRootHidePath.h"
 #import <UIKit/UIKit.h>
 
 #define kMaxCacheCount 3
 #define kIPStatusCacheKey @"IPStatusCache"
-#define kIPStatusPlistPath @"/var/jb/var/mobile/Library/Preferences/com.weaponx.ipstatus.plist"
+#define kIPStatusPlistPath PXPreferencesFilePath(@"com.weaponx.ipstatus.plist")
 
-// Path helper for rootless jailbreak compatibility
 static NSString *getIPLocationTimePlistPath() {
-    NSString *rootPrefix = @"";
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    // Check for rootless jailbreak
-    if ([fileManager fileExistsAtPath:@"/var/jb"]) {
-        rootPrefix = @"/var/jb";
-    }
-    
-    NSString *basePath = [NSString stringWithFormat:@"%@/var/mobile/Library/Preferences", rootPrefix];
-    return [basePath stringByAppendingPathComponent:@"com.weaponx.iplocationtime.plist"];
+    return PXPreferencesFilePath(@"com.weaponx.iplocationtime.plist");
 }
 
 @interface IPStatusCacheManager ()

@@ -1,21 +1,14 @@
 #!/bin/sh
 
+set -eu
+
 # WeaponX Debug Script
 echo "WeaponX Debug Tool"
 echo "==================="
 
-# Check if we're in a rootless environment
-if [ -d /var/jb ]; then
-  ROOT_PREFIX="/var/jb"
-  echo "✅ Rootless jailbreak detected."
-else
-  ROOT_PREFIX=""
-  echo "✅ Traditional jailbreak detected."
-fi
-
-DAEMON_PATH="${ROOT_PREFIX}/Library/WeaponX/WeaponXDaemon"
-LAUNCHDAEMON_PATH="${ROOT_PREFIX}/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist"
-GUARDIAN_DIR="${ROOT_PREFIX}/Library/WeaponX/Guardian"
+DAEMON_PATH="/Library/WeaponX/WeaponXDaemon"
+LAUNCHDAEMON_PATH="/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist"
+GUARDIAN_DIR="/Library/WeaponX/Guardian"
 LOGS_DIR="${GUARDIAN_DIR}"
 
 show_help() {
@@ -98,7 +91,6 @@ restart_daemon() {
   
   echo "Unloading daemon..."
   launchctl bootout system/com.hydra.weaponx.guardian 2>/dev/null || true
-  launchctl unload "$LAUNCHDAEMON_PATH" 2>/dev/null || true
   sleep 1
   
   # Kill any lingering processes
@@ -112,8 +104,8 @@ restart_daemon() {
   if launchctl bootstrap system "$LAUNCHDAEMON_PATH" 2>/dev/null; then
     echo "✅ Daemon bootstrapped successfully"
   else
-    echo "⚠️ Bootstrap failed, trying traditional load..."
-    launchctl load -w "$LAUNCHDAEMON_PATH" 2>/dev/null
+    echo "❌ RootHide daemon bootstrap failed" >&2
+    return 1
   fi
   
   sleep 2
@@ -176,7 +168,7 @@ enable_tracing() {
 }
 
 # Main command processing
-case "$1" in
+case "${1:-}" in
   status)
     daemon_status
     ;;

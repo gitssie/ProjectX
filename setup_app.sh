@@ -1,88 +1,39 @@
 #!/bin/sh
 
-echo "Setting up ProjectX app..."
+set -eu
 
-# Detect jailbreak type
-if [ -d "/var/jb" ]; then
-    JBPREFIX="/var/jb"
-    echo "Detected rootless jailbreak at /var/jb"
-elif [ -d "/var/LIB" ]; then
-    JBPREFIX="/var/LIB"
-    echo "Detected rootless jailbreak at /var/LIB"
-else
-    JBPREFIX=""
-    echo "Detected rootful jailbreak"
-fi
+TWEAK_DIR="/Library/MobileSubstrate/DynamicLibraries"
+APP_DIR="/Applications/ProjectX.app"
+UICACHE="/usr/bin/uicache"
+SBRELOAD="/usr/bin/sbreload"
 
-# Fix permissions for ElleKit directory
-echo "Setting up ElleKit directories..."
-mkdir -p ${JBPREFIX}/Library/ElleKit/DynamicLibraries
-chmod 755 ${JBPREFIX}/Library/ElleKit
-chmod 755 ${JBPREFIX}/Library/ElleKit/DynamicLibraries
+echo "Setting up ProjectX for RootHide..."
 
-# For backwards compatibility with MobileSubstrate
-echo "Setting up MobileSubstrate directories (for compatibility)..."
-mkdir -p ${JBPREFIX}/Library/MobileSubstrate/DynamicLibraries
-chmod 755 ${JBPREFIX}/Library/MobileSubstrate
-chmod 755 ${JBPREFIX}/Library/MobileSubstrate/DynamicLibraries
+mkdir -p "$TWEAK_DIR"
+chmod 755 "/Library/MobileSubstrate" "$TWEAK_DIR"
 
-# Ensure the dylib has proper permissions
-echo "Setting up tweak permissions..."
-if [ -f "${JBPREFIX}/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.dylib" ]; then
-    chmod 644 ${JBPREFIX}/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.dylib
-fi
-
-if [ -f "${JBPREFIX}/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist" ]; then
-    chmod 644 ${JBPREFIX}/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist
-fi
-
-if [ -f "${JBPREFIX}/Library/ElleKit/DynamicLibraries/ProjectXTweak.dylib" ]; then
-    chmod 644 ${JBPREFIX}/Library/ElleKit/DynamicLibraries/ProjectXTweak.dylib
-fi
-
-if [ -f "${JBPREFIX}/Library/ElleKit/DynamicLibraries/ProjectXTweak.plist" ]; then
-    chmod 644 ${JBPREFIX}/Library/ElleKit/DynamicLibraries/ProjectXTweak.plist
-fi
-
-# Fix path issues - specific to Dopamine 2
-if [ -d "${JBPREFIX}/var/jb/Applications/ProjectX.app" ] && [ ! -d "${JBPREFIX}/Applications/ProjectX.app" ]; then
-    echo "Fixing duplicate path issue..."
-    mkdir -p ${JBPREFIX}/Applications
-    cp -R ${JBPREFIX}/var/jb/Applications/ProjectX.app ${JBPREFIX}/Applications/
-fi
-
-# For standard rootless path issues
-if [ -d "${JBPREFIX}/var/jb/Applications/ProjectX.app" ] && [ ! -d "${JBPREFIX}/Applications/ProjectX.app" ]; then
-    echo "Fixing path issue..."
-    mkdir -p ${JBPREFIX}/Applications
-    cp -R ${JBPREFIX}/var/jb/Applications/ProjectX.app ${JBPREFIX}/Applications/
-fi
-
-# Ensure app permissions are correct
-if [ -d "${JBPREFIX}/Applications/ProjectX.app" ]; then
-    echo "Setting app permissions..."
-    chmod 755 ${JBPREFIX}/Applications/ProjectX.app
-    chmod 755 ${JBPREFIX}/Applications/ProjectX.app/ProjectX
-    
-    # Force app registration with SpringBoard - Dopamine 2 methods
-    echo "Registering app with SpringBoard..."
-    if command -v uicache >/dev/null 2>&1; then
-        uicache --path ${JBPREFIX}/Applications/ProjectX.app
+for tweak_file in ProjectXTweak.dylib ProjectXTweak.plist; do
+    if [ -f "$TWEAK_DIR/$tweak_file" ]; then
+        chmod 644 "$TWEAK_DIR/$tweak_file"
     fi
-else
-    echo "App not found in expected locations"
-fi
+done
 
-# Handle SpringBoard reload based on available tools
-if [ -f "${JBPREFIX}/usr/bin/sbreload" ]; then
-    echo "Reloading SpringBoard using sbreload..."
-    ${JBPREFIX}/usr/bin/sbreload
-elif [ -f "${JBPREFIX}/usr/bin/ldrestart" ]; then
-    echo "Light restarting device..."
-    ${JBPREFIX}/usr/bin/ldrestart
-else
-    echo "Restarting SpringBoard directly..."
-    killall -9 SpringBoard
+if [ ! -x "$APP_DIR/ProjectX" ]; then
+    echo "error: ProjectX executable not found at $APP_DIR/ProjectX" >&2
+    exit 1
 fi
+chmod 755 "$APP_DIR" "$APP_DIR/ProjectX"
 
-echo "Setup complete!" 
+if [ ! -x "$UICACHE" ]; then
+    echo "error: RootHide uicache not found at $UICACHE" >&2
+    exit 1
+fi
+"$UICACHE" --path "$APP_DIR"
+
+if [ ! -x "$SBRELOAD" ]; then
+    echo "error: RootHide sbreload not found at $SBRELOAD" >&2
+    exit 1
+fi
+"$SBRELOAD"
+
+echo "ProjectX RootHide setup complete."

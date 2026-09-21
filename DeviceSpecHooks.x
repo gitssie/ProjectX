@@ -3,6 +3,9 @@
 #import "IdentifierManager.h"
 #import "ProfileManager.h"
 #import "ProjectXLogging.h"
+#import "PXRootHidePath.h"
+#import "PXProcessHookPolicy.h"
+#import "PXSysctlHookRouter.h"
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
@@ -32,9 +35,7 @@ static int (*orig_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, v
 static kern_return_t (*orig_host_statistics64)(host_t host, host_flavor_t flavor, host_info64_t info, mach_msg_type_number_t *count);
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+#define kScopedAppsPath PXGlobalScopePreferencesPath()
 
 // Scoped apps cache
 static NSMutableDictionary *scopedAppsCache = nil;
@@ -58,7 +59,7 @@ static void logMemoryHook(NSString *apiName);
 
 // Function declarations
 static NSString *getCurrentBundleID(void);
-static NSDictionary *loadScopedApps(void);
+static NSDictionary *loadScopedApps(void) __attribute__((unused));
 static BOOL isInScopedAppsList(void);
 static BOOL isSpoofingEnabled(void);
 static NSString *getSpoofedDeviceModel(void);
@@ -71,6 +72,9 @@ static void getConsistentMemoryStats(unsigned long long totalMemory,
                                     unsigned long long *inactiveMemory);
 static kern_return_t hook_host_statistics64(host_t host, host_flavor_t flavor, host_info64_t info, mach_msg_type_number_t *count);
 static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+static BOOL PXDeviceSpecSysctlByNameHandler(const char *name, void *oldp,
+                                            size_t *oldlenp, void *newp,
+                                            size_t newlen, int *result);
 static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo);
 static CGSize parseResolution(NSString *resolutionString);
 
@@ -106,7 +110,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
+        NSArray *possiblePaths = @[kScopedAppsPath];
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *validPath = nil;
         
@@ -158,25 +162,8 @@ static NSDictionary *loadScopedApps(void) {
 static BOOL isInScopedAppsList(void) {
     @try {
         NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        
-        // Check if this bundle ID is in the scoped apps dictionary
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        
-        // Check if the app is enabled
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-        
+        return bundleID.length > 0 &&
+            [[IdentifierManager sharedManager] shouldSpoofForBundle:bundleID];
     } @catch (NSException *e) {
         return NO;
     }
@@ -204,17 +191,6 @@ static BOOL isSpoofingEnabled(void) {
         }
     }
     
-    // Always exclude system processes
-    if ([currentBundleID hasPrefix:@"com.apple."] && 
-        ![currentBundleID isEqualToString:@"com.apple.mobilesafari"] &&
-        ![currentBundleID isEqualToString:@"com.apple.webapp"]) {
-        @synchronized(cachedBundleDecisions) {
-            cachedBundleDecisions[currentBundleID] = @NO;
-            cachedBundleDecisions[[currentBundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-        }
-        return NO;
-    }
-    
     // Check if the current app is a scoped app AND if device model spoofing is enabled
     BOOL shouldSpoof = NO;
     @try {
@@ -231,7 +207,7 @@ static BOOL isSpoofingEnabled(void) {
                 // If the direct check fails, try profile settings directly
                 if (!shouldSpoof) {
                     // Try to get profile settings directly from file
-                    NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+                    NSString *profilesPath = PXProfilesDirectoryPath();
                     NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
                     NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
                     
@@ -265,7 +241,7 @@ static NSString *getSpoofedDeviceModel() {
         NSString *deviceModel = nil;
         
         // METHOD 1: Try direct access from profile plist
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesPath = PXProfilesDirectoryPath();
         NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
         NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
         
@@ -322,7 +298,7 @@ static NSDictionary *getDeviceSpecs() {
     
     @try {
         // METHOD 1: Try to get specs directly from profile plist files
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesPath = PXProfilesDirectoryPath();
         NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
         NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
         
@@ -795,128 +771,6 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 
 %end
 
-#pragma mark - WebGL Info Hooks
-
-%hook WebGLRenderingContext
-
-// Hook for WebGL vendor and renderer strings
-- (NSString *)getParameter:(unsigned)pname {
-    NSString *original = %orig;
-    
-    if (!isSpoofingEnabled()) {
-        return original;
-    }
-    
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
-        return original;
-    }
-    
-    NSDictionary *webGLInfo = specs[@"webGLInfo"];
-    if (!webGLInfo) {
-        return original;
-    }
-    
-    // Map WebGL parameter constants to our stored values
-    // VENDOR = 0x1F00, RENDERER = 0x1F01, VERSION = 0x1F02
-    NSString *spoofedValue = nil;
-    
-    if (pname == 0x1F00) { // VENDOR
-        spoofedValue = webGLInfo[@"webglVendor"];
-    } else if (pname == 0x1F01) { // RENDERER
-        spoofedValue = webGLInfo[@"webglRenderer"];
-    } else if (pname == 0x1F02) { // VERSION
-        spoofedValue = webGLInfo[@"webglVersion"];
-    } else if (pname == 0x8B4F || pname == 0x8B4E) { // UNMASKED_VENDOR_WEBGL or UNMASKED_RENDERER_WEBGL
-        spoofedValue = (pname == 0x8B4F) ? webGLInfo[@"unmaskedVendor"] : webGLInfo[@"unmaskedRenderer"];
-    } else if (pname == 0x0D33) { // MAX_TEXTURE_SIZE
-        return [NSString stringWithFormat:@"%@", webGLInfo[@"maxTextureSize"]];
-    } else if (pname == 0x8D57) { // MAX_RENDERBUFFER_SIZE
-        return [NSString stringWithFormat:@"%@", webGLInfo[@"maxRenderBufferSize"]];
-    }
-    
-    if (spoofedValue) {
-        static NSMutableSet *loggedParameters = nil;
-        if (!loggedParameters) {
-            loggedParameters = [NSMutableSet set];
-        }
-        
-        NSString *paramKey = [NSString stringWithFormat:@"%u", pname];
-        if (![loggedParameters containsObject:paramKey]) {
-            [loggedParameters addObject:paramKey];
-            PXLog(@"[DeviceSpec] Spoofing WebGL parameter 0x%X from '%@' to '%@'", pname, original, spoofedValue);
-        }
-        
-        return spoofedValue;
-    }
-    
-    return original;
-}
-
-%end
-
-#pragma mark - Metal API Hooks
-
-%hook MTLDevice
-
-// Hook for name property
-- (NSString *)name {
-    NSString *originalName = %orig;
-    
-    if (!isSpoofingEnabled()) {
-        return originalName;
-    }
-    
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
-        return originalName;
-    }
-    
-    NSString *gpuFamily = specs[@"gpuFamily"];
-    if (!gpuFamily) {
-        return originalName;
-    }
-    
-    // Log the change the first time
-    static BOOL loggedGPUName = NO;
-    if (!loggedGPUName) {
-        PXLog(@"[DeviceSpec] Spoofing GPU name from '%@' to '%@'", originalName, gpuFamily);
-        loggedGPUName = YES;
-    }
-    
-    return gpuFamily;
-}
-
-// Also hook the family name property
-- (NSString *)familyName {
-    NSString *originalFamilyName = %orig;
-    
-    if (!isSpoofingEnabled()) {
-        return originalFamilyName;
-    }
-    
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
-        return originalFamilyName;
-    }
-    
-    NSString *gpuFamily = specs[@"gpuFamily"];
-    if (!gpuFamily) {
-        return originalFamilyName;
-    }
-    
-    // Log the change the first time
-    static BOOL loggedGPUFamilyName = NO;
-    if (!loggedGPUFamilyName) {
-        PXLog(@"[DeviceSpec] Spoofing GPU family name from '%@' to '%@'", originalFamilyName, gpuFamily);
-        loggedGPUFamilyName = YES;
-    }
-    
-    return gpuFamily;
-}
-
-%end
-
 #pragma mark - Screen Density (DPI) Hooks
 
 %hook UIScreen
@@ -1096,140 +950,6 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
     }
 }
 
-#pragma mark - Canvas Fingerprinting Protection
-
-// Add hooks for canvas toDataURL and getImageData to prevent canvas fingerprinting
-%hook WKWebView
-
-// Add JavaScript to protect against canvas fingerprinting 
-- (void)_didCreateMainFrame:(WKFrameInfo *)frame {
-    %orig;
-    
-    if (!isSpoofingEnabled()) {
-        return;
-    }
-    
-    NSString *deviceModel = getSpoofedDeviceModel();
-    if (!deviceModel) {
-        return;
-    }
-    
-    // Create a hash value from the device model to generate consistent noise
-    NSUInteger deviceModelHash = [deviceModel hash];
-    
-    // This script adds noise to canvas operations in a way that's consistent for the same device model
-    NSString *canvasProtectionScript = [NSString stringWithFormat:
-                                       @"(function() {"
-                                       // Store original methods before modifying them
-                                       @"  const origToDataURL = HTMLCanvasElement.prototype.toDataURL;"
-                                       @"  const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;"
-                                       @"  const origReadPixels = WebGLRenderingContext.prototype.readPixels;"
-                                       
-                                       // Define a noise function based on spoofed device model
-                                       @"  const deviceSeed = %lu;"
-                                       @"  function generateNoise(input) {"
-                                       @"    let hash = (deviceSeed * 131 + input) & 0xFFFFFFFF;"
-                                       @"    return (hash / 0xFFFFFFFF) * 2 - 1;"  // -1 to +1 range
-                                       @"  }"
-                                       
-                                       // Hook 2D Canvas toDataURL
-                                       @"  HTMLCanvasElement.prototype.toDataURL = function() {"
-                                       @"    try {"
-                                       @"      const context = this.getContext('2d');"
-                                       @"      if (context && this.width > 16 && this.height > 16) {"
-                                       @"        // Subtly modify the canvas content in a consistent way"
-                                       @"        const imgData = context.getImageData(0, 0, 2, 2);"
-                                       @"        if (imgData && imgData.data) {"
-                                       @"          // Add subtle, deterministic noise to a small portion"
-                                       @"          for (let i = 0; i < imgData.data.length; i += 4) {"
-                                       @"            const noise = generateNoise(i) * 0.5;"
-                                       @"            imgData.data[i] = Math.min(255, Math.max(0, imgData.data[i] + noise));"
-                                       @"          }"
-                                       @"          context.putImageData(imgData, 0, 0);"
-                                       @"        }"
-                                       @"      }"
-                                       @"    } catch(e) {}"
-                                       @"    return origToDataURL.apply(this, arguments);"
-                                       @"  };"
-                                       
-                                       // Hook 2D Canvas getImageData
-                                       @"  CanvasRenderingContext2D.prototype.getImageData = function() {"
-                                       @"    const imgData = origGetImageData.apply(this, arguments);"
-                                       @"    try {"
-                                       @"      // Add consistent noise to the image data"
-                                       @"      if (imgData && imgData.data && imgData.data.length > 0) {"
-                                       @"        // Only modify a small percentage of pixels to avoid visual detection"
-                                       @"        for (let i = 0; i < imgData.data.length; i += 40) {"
-                                       @"          const noise = generateNoise(i) * 1.0;"
-                                       @"          imgData.data[i] = Math.min(255, Math.max(0, imgData.data[i] + noise));"
-                                       @"        }"
-                                       @"      }"
-                                       @"    } catch(e) {}"
-                                       @"    return imgData;"
-                                       @"  };"
-                                       
-                                       // Hook WebGL readPixels
-                                       @"  WebGLRenderingContext.prototype.readPixels = function(x, y, width, height, format, type, pixels) {"
-                                       @"    // First perform the regular pixel read"
-                                       @"    origReadPixels.apply(this, arguments);"
-                                       @"    try {"
-                                       @"      // Then apply consistent noise to the output"
-                                       @"      if (pixels && pixels.length > 0) {"
-                                       @"        for (let i = 0; i < pixels.length; i += 50) {"
-                                       @"          const pixelIndex = i %% pixels.length;"
-                                       @"          const noise = generateNoise(pixelIndex) * 1.0;"
-                                       @"          pixels[pixelIndex] = Math.min(255, Math.max(0, pixels[pixelIndex] + noise));"
-                                       @"        }"
-                                       @"      }"
-                                       @"    } catch(e) {}"
-                                       @"    return;"
-                                       @"  };"
-                                       
-                                       // Prevent canvas font fingerprinting
-                                       @"  const origMeasureText = CanvasRenderingContext2D.prototype.measureText;"
-                                       @"  CanvasRenderingContext2D.prototype.measureText = function(text) {"
-                                       @"    const result = origMeasureText.apply(this, arguments);"
-                                       @"    // Add tiny noise to font measurement consistent with device model"
-                                       @"    const noise = (generateNoise(text.length) * 0.1) + 1.0;"
-                                       @"    const origWidth = result.width;"
-                                       @"    Object.defineProperty(result, 'width', { value: origWidth * noise });"
-                                       @"    return result;"
-                                       @"  };"
-                                       
-                                       // Extra protection for text rendering
-                                       @"  const origFillText = CanvasRenderingContext2D.prototype.fillText;"
-                                       @"  CanvasRenderingContext2D.prototype.fillText = function(text, x, y, maxWidth) {"
-                                       @"    // Add subtle position variation consistent with device model"
-                                       @"    const xNoise = generateNoise(text.length * 31) * 0.2;"
-                                       @"    const yNoise = generateNoise(text.length * 37) * 0.2;"
-                                       @"    const newX = x + xNoise;"
-                                       @"    const newY = y + yNoise;"
-                                       @"    if (arguments.length < 4) {"
-                                       @"      return origFillText.call(this, text, newX, newY);"
-                                       @"    } else {"
-                                       @"      return origFillText.call(this, text, newX, newY, maxWidth);"
-                                       @"    }"
-                                       @"  };"
-                                       
-                                       @"})();",
-                                       (unsigned long)deviceModelHash];
-    
-    // Execute the script
-    [self evaluateJavaScript:canvasProtectionScript completionHandler:^(id result, NSError *error) {
-        if (error) {
-            PXLog(@"[DeviceSpec] Error injecting canvas protection script: %@", error);
-        } else {
-            static BOOL loggedCanvasProtection = NO;
-            if (!loggedCanvasProtection) {
-                PXLog(@"[DeviceSpec] Successfully injected canvas fingerprinting protection for %@", deviceModel);
-                loggedCanvasProtection = YES;
-            }
-        }
-    }];
-}
-
-%end
-
 #pragma mark - CPU Core Spoofing Enhancements
 
 // Add an early hook to ensure CPU core count is spoofed as early as possible
@@ -1339,6 +1059,9 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
 
 %ctor {
     @autoreleasepool {
+        if (!PXCurrentProcessMayInstallApplicationHooks()) {
+            return;
+        }
         @try {
             PXLog(@"[DeviceSpec] Initializing device specifications spoofing hooks");
             
@@ -1346,14 +1069,6 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
             
             // Skip if we can't get bundle ID
             if (!currentBundleID || [currentBundleID length] == 0) {
-                return;
-            }
-            
-            // Don't hook system processes and our own apps
-            if ([currentBundleID hasPrefix:@"com.apple."] || 
-                [currentBundleID isEqualToString:@"com.hydra.projectx"] || 
-                [currentBundleID isEqualToString:@"com.hydra.weaponx"]) {
-                PXLog(@"[DeviceSpec] Not hooking system process: %@", currentBundleID);
                 return;
             }
             
@@ -1392,11 +1107,9 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
             // Initialize memory hook function pointers for scoped apps only
             void *libSystem = dlopen("/usr/lib/libSystem.dylib", RTLD_NOW);
             if (libSystem) {
-                // Hook sysctlbyname for memory-related calls
-                orig_sysctlbyname = dlsym(libSystem, "sysctlbyname");
-                if (orig_sysctlbyname) {
-                    MSHookFunction(orig_sysctlbyname, (void *)hook_sysctlbyname, (void **)&orig_sysctlbyname);
-                    PXLog(@"[DeviceSpec] Successfully hooked sysctlbyname for memory spoofing");
+                orig_sysctlbyname = PXCallOriginalSysctlByName;
+                if (PXRegisterSysctlByNameHandler(PXDeviceSpecSysctlByNameHandler)) {
+                    PXLog(@"[DeviceSpec] Registered device-spec sysctl handler");
                 }
                 
                 // Hook host_statistics64 for VM stats spoofing
@@ -1654,7 +1367,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
             }
         }
     }
-    else if (strcmp(name, "hw.cpu.brand_string") == 0 || strcmp(name, "hw.cpubrand") == 0 || strcmp(name, "hw.model") == 0) {
+    else if (strcmp(name, "hw.cpu.brand_string") == 0 || strcmp(name, "hw.cpubrand") == 0) {
         // CPU Brand/Model Name - return the processor name like "Apple A11 Bionic"
         if (cpuArchitecture && cpuArchitecture.length > 0) {
             const char *cpuBrand = [cpuArchitecture UTF8String];
@@ -1975,29 +1688,6 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
             }
         }
     }
-    else if (strcmp(name, "hw.machine") == 0) {
-        // Machine name - should return the device model like "iPhone10,1"
-        NSString *deviceModel = getSpoofedDeviceModel();
-        if (deviceModel && deviceModel.length > 0) {
-            const char *machineStr = [deviceModel UTF8String];
-            if (machineStr && *oldlenp > 0) {
-                size_t machineLen = strlen(machineStr);
-                if (machineLen < *oldlenp) {
-                    *oldlenp = machineLen + 1;
-                    memset(oldp, 0, *oldlenp);
-                    strcpy(oldp, machineStr);
-                    
-                    static BOOL loggedMachine = NO;
-                    if (!loggedMachine) {
-                        PXLog(@"[DeviceSpec] Spoofed hw.machine to '%s'", machineStr);
-                        loggedMachine = YES;
-                    }
-                } else {
-                    PXLog(@"[DeviceSpec] WARNING: Machine string too long for buffer");
-                }
-            }
-        }
-    }
     else if (strcmp(name, "hw.cpu.features") == 0) {
         // CPU features string - return a realistic feature set
         NSString *cpuFeatures = @"SSE SSE2 SSE3 SSSE3 SSE4.1 SSE4.2 AES AVX AVX2 BMI1 BMI2 FMA";
@@ -2032,3 +1722,27 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     
     return result;
 } 
+
+static BOOL PXDeviceSpecSysctlByNameHandler(const char *name,
+                                            void *oldp,
+                                            size_t *oldlenp,
+                                            void *newp,
+                                            size_t newlen,
+                                            int *result) {
+    if (!name) return NO;
+    static const char *const names[] = {
+        "hw.activecpu", "hw.cachelinesize", "hw.cpu.brand_string",
+        "hw.cpu.features", "hw.cpubrand", "hw.cpufamily",
+        "hw.cpufrequency", "hw.cpufrequency_max", "hw.cpufrequency_min",
+        "hw.cpusubtype", "hw.cputype", "hw.l1dcachesize",
+        "hw.l1icachesize", "hw.l2cachesize", "hw.memsize", "hw.ncpu",
+        "hw.physmem", "vm.swapusage"
+    };
+    BOOL matches = strncmp(name, "hw.optional.", 12) == 0;
+    for (NSUInteger index = 0; !matches && index < sizeof(names) / sizeof(names[0]); index++) {
+        matches = strcmp(name, names[index]) == 0;
+    }
+    if (!matches) return NO;
+    *result = hook_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+    return YES;
+}

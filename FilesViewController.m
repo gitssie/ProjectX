@@ -1,5 +1,6 @@
 #import "FilesViewController.h"
 #import "FileManagerViewController.h"
+#import "PXRootHidePath.h"
 #import <objc/runtime.h>
 
 @interface FilesViewController ()
@@ -630,10 +631,10 @@
     
     // Directory shortcuts
     NSArray *directories = @[
-        @{@"title": @"Library", @"path": @"/var/jb/var/mobile/Library", @"icon": @"folder.fill.badge.person.crop"},
-        @{@"title": @"Documents", @"path": @"/var/jb/var/mobile/Documents", @"icon": @"doc.fill"},
-        @{@"title": @"Root", @"path": @"/var/jb", @"icon": @"terminal.fill"},
-        @{@"title": @"Applications", @"path": @"/var/jb/Applications", @"icon": @"app.fill"}
+        @{@"title": @"Library", @"path": PXRootFSPath(@"/var/mobile/Library"), @"icon": @"folder.fill.badge.person.crop"},
+        @{@"title": @"Documents", @"path": PXRootFSPath(@"/var/mobile/Documents"), @"icon": @"doc.fill"},
+        @{@"title": @"Root", @"path": PXJBRootPath(@"/"), @"icon": @"terminal.fill"},
+        @{@"title": @"Applications", @"path": PXRootFSPath(@"/Applications"), @"icon": @"app.fill"}
     ];
     
     CGFloat buttonWidth = (shortcutsContainer.bounds.size.width - 30) / 4;
@@ -697,10 +698,10 @@
 
 - (void)openDirectoryButtonTapped:(UIButton *)sender {
     NSArray *directories = @[
-        @"/var/jb/var/mobile/Library",
-        @"/var/jb/var/mobile/Documents",
-        @"/var/jb",
-        @"/var/jb/Applications"
+        PXRootFSPath(@"/var/mobile/Library"),
+        PXRootFSPath(@"/var/mobile/Documents"),
+        PXJBRootPath(@"/"),
+        PXRootFSPath(@"/Applications")
     ];
     
     NSString *path = directories[sender.tag];
@@ -714,7 +715,7 @@
 
 - (void)openFullFileBrowserTapped {
     // Present our own file browser
-    FileManagerViewController *fileManagerVC = [[FileManagerViewController alloc] initWithPath:@"/var/jb"];
+    FileManagerViewController *fileManagerVC = [[FileManagerViewController alloc] initWithPath:PXJBRootPath(@"/")];
     UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:fileManagerVC];
     navController.modalPresentationStyle = UIModalPresentationFullScreen;
     [self presentViewController:navController animated:YES completion:nil];

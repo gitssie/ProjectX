@@ -7,10 +7,9 @@
 
 // Carrier information methods
 + (NSArray *)getCarriersForCountry:(NSString *)countryCode;
-+ (NSDictionary *)getRandomCarrierForCountry:(NSString *)countryCode;
-+ (BOOL)saveCarrierDetails:(NSString *)carrierName mcc:(NSString *)mcc mnc:(NSString *)mnc;
 + (NSDictionary *)getSavedCarrierDetails;
 + (NSDictionary *)getSavedCarrierDetailsWithForcedRefresh:(BOOL)forceRefresh;
++ (NSDictionary *)getSavedNetworkIdentity;
 
 // US Carriers
 + (NSArray *)getUSCarriers;

@@ -8,6 +8,11 @@
 #import "IPMonitorService.h"
 #import "LocationSpoofingManager.h"
 #import "NetworkManager.h"
+#import "NetworkIdentity.h"
+#import "ProfileManager.h"
+#import "PXRootHidePath.h"
+#import "CarrierSelectionViewController.h"
+#import "TrustedCarrierPolicy.h"
 #import "IPStatusCacheManager.h" // Import for IP and location data saving
 #import "DomainBlockingSettings.h"
 #import "DomainManagementViewController.h"
@@ -309,7 +314,7 @@
 @end
 
 
-@interface SecurityTabViewController () <UITextFieldDelegate>
+@interface SecurityTabViewController () <UITextFieldDelegate, CarrierSelectionViewControllerDelegate>
 
 // Domain Blocking Properties
 @property (nonatomic, strong) UISwitch *domainBlockingToggleSwitch;
@@ -1060,6 +1065,7 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self refreshPinnedCoordinates];
+    [self prepareTrustedCarrierSelectionForPresentation];
     
     // Refresh network identifiers from the current profile
     [self refreshNetworkIdentifiers];
@@ -1123,46 +1129,7 @@
         }
     }
     
-    if (connectionType == 0 || connectionType == 2) {
-        // Auto or Cellular - Update carrier details
-        // Use the getSavedCarrierDetails method to avoid generation
-        SEL carrierDetailsSel = NSSelectorFromString(@"getSavedCarrierDetails");
-            
-        if ([networkManagerClass respondsToSelector:carrierDetailsSel]) {
-            // Use NSInvocation to safely call the class method
-            NSMethodSignature *signature = [networkManagerClass methodSignatureForSelector:carrierDetailsSel];
-            if (signature) {
-                NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-                [invocation setTarget:networkManagerClass];
-                [invocation setSelector:carrierDetailsSel];
-                
-                [invocation invoke];
-                
-                // Get the return value
-                NSDictionary * __unsafe_unretained carrierInfo;
-                [invocation getReturnValue:&carrierInfo];
-                
-                if (carrierInfo) {
-                    NSLog(@"[WeaponX] ✅ Updated UI with saved carrier details: %@ (%@-%@)", 
-                          carrierInfo[@"name"], carrierInfo[@"mcc"], carrierInfo[@"mnc"]);
-                           
-                    // Update the UI if we have carrier info labels
-                    if (connectionType == 2) {
-                        // Update carrier display in the UI if it exists
-                        if (self.carrierNameField) {
-                            self.carrierNameField.text = carrierInfo[@"name"];
-                        }
-                        if (self.mccField) {
-                            self.mccField.text = carrierInfo[@"mcc"];
-                        }
-                        if (self.mncField) {
-                            self.mncField.text = carrierInfo[@"mnc"];
-                        }
-                    }
-                }
-            }
-        }
-    }
+    [self updateGeneratedCarrierStatusWithNetworkIdentity:[NetworkManager getSavedNetworkIdentity]];
 }
 
 - (void)viewDidLoad {
@@ -1578,81 +1545,72 @@
     [self.networkConnectionTypeSegment addTarget:self action:@selector(networkConnectionTypeChanged:) forControlEvents:UIControlEventValueChanged];
     [controlView.contentView addSubview:self.networkConnectionTypeSegment];
 
-    // --- ISO Country Code segmented control (only for Cellular) ---
-    NSArray *isoSegments = @[@"US", @"IN", @"CA"];
-    self.networkISOCountrySegment = [[UISegmentedControl alloc] initWithItems:isoSegments];
-    self.networkISOCountrySegment.translatesAutoresizingMaskIntoConstraints = NO;
-    self.networkISOCountrySegment.tag = 2001;
-    
-    // Load saved ISO code or default to US
-    NSString *savedISO = [self.securitySettings stringForKey:@"networkISOCountryCode"] ?: @"us";
-    NSInteger defaultISOIndex = 0;
-    if ([savedISO isEqualToString:@"in"]) defaultISOIndex = 1;
-    else if ([savedISO isEqualToString:@"ca"]) defaultISOIndex = 2;
-    else if (![savedISO isEqualToString:@"us"] && ![savedISO isEqualToString:@"in"] && ![savedISO isEqualToString:@"ca"]) {
-        // This is a custom ISO code
-        defaultISOIndex = -1; // Don't select any segment
-    }
-    [self.networkISOCountrySegment setSelectedSegmentIndex:defaultISOIndex];
-    
-    // Enable/disable based on network data spoofing and connection type
-    self.networkISOCountrySegment.enabled = (networkDataSpoofEnabled && savedConnectionType == 2);
-    [self.networkISOCountrySegment addTarget:self action:@selector(networkISOCountryChanged:) forControlEvents:UIControlEventValueChanged];
-    
-    // Add custom ISO button
-    self.customISOButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.customISOButton setTitle:@"Custom" forState:UIControlStateNormal];
-    
-    // Style to match segmented control appearance
-    self.customISOButton.backgroundColor = [UIColor systemBackgroundColor];
-    if (@available(iOS 13.0, *)) {
-        self.customISOButton.backgroundColor = [UIColor systemGray5Color];
-    }
-    self.customISOButton.layer.cornerRadius = 4;
-    self.customISOButton.titleLabel.font = [UIFont systemFontOfSize:13];
-    self.customISOButton.tintColor = [UIColor labelColor];
-    
-    // Highlight the button if a custom ISO is selected
-    if (defaultISOIndex == -1) {
-        if (@available(iOS 13.0, *)) {
-            self.customISOButton.backgroundColor = [UIColor systemBlueColor];
-            [self.customISOButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        } else {
-                            self.customISOButton.backgroundColor = [UIColor systemBlueColor];
-            [self.customISOButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        }
-        [self.customISOButton setTitle:[NSString stringWithFormat:@"Custom: %@", [savedISO uppercaseString]] forState:UIControlStateNormal];
-    }
-    
-    self.customISOButton.translatesAutoresizingMaskIntoConstraints = NO;
-    self.customISOButton.enabled = (networkDataSpoofEnabled && savedConnectionType == 2);
-    [self.customISOButton addTarget:self action:@selector(showCustomISOPrompt) forControlEvents:UIControlEventTouchUpInside];
-    
-    // Add quick generate button with refresh icon
-    self.quickGenerateButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if (@available(iOS 13.0, *)) {
-        [self.quickGenerateButton setImage:[UIImage systemImageNamed:@"arrow.clockwise"] forState:UIControlStateNormal];
-        self.quickGenerateButton.backgroundColor = [UIColor systemGray5Color];
-    } else {
-        [self.quickGenerateButton setTitle:@"↻" forState:UIControlStateNormal]; // Fallback for older iOS
-        self.quickGenerateButton.backgroundColor = [UIColor systemBackgroundColor];
-    }
-    self.quickGenerateButton.layer.cornerRadius = 4;
-    self.quickGenerateButton.tintColor = [UIColor labelColor];
-    self.quickGenerateButton.translatesAutoresizingMaskIntoConstraints = NO;
-    self.quickGenerateButton.enabled = (networkDataSpoofEnabled && savedConnectionType == 2);
-    [self.quickGenerateButton addTarget:self action:@selector(quickGenerateButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
-    
-    // Create a container for ISO options to center them together
-    UIView *isoContainer = [[UIView alloc] init];
-    isoContainer.translatesAutoresizingMaskIntoConstraints = NO;
-    isoContainer.backgroundColor = [UIColor clearColor];
-    [controlView.contentView addSubview:isoContainer];
-    
-    // Add the segmented control, custom button and generate button to the container
-    [isoContainer addSubview:self.networkISOCountrySegment];
-    [isoContainer addSubview:self.customISOButton];
-    [isoContainer addSubview:self.quickGenerateButton];
+    // Keep carrier selection human-readable. Catalog identifiers remain internal.
+    self.carrierSelectionContainer = [[UIView alloc] init];
+    self.carrierSelectionContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    self.carrierSelectionContainer.backgroundColor = [UIColor clearColor];
+    [controlView.contentView addSubview:self.carrierSelectionContainer];
+
+    self.trustedCarriersButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.trustedCarriersButton.translatesAutoresizingMaskIntoConstraints = NO;
+    self.trustedCarriersButton.backgroundColor = [UIColor secondarySystemBackgroundColor];
+    self.trustedCarriersButton.layer.cornerRadius = 12.0;
+    self.trustedCarriersButton.accessibilityLabel = @"Trusted Carriers";
+    self.trustedCarriersButton.accessibilityTraits = UIAccessibilityTraitButton;
+    [self.trustedCarriersButton addTarget:self action:@selector(trustedCarriersButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [self.carrierSelectionContainer addSubview:self.trustedCarriersButton];
+
+    UILabel *trustedCarriersLabel = [[UILabel alloc] init];
+    trustedCarriersLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    trustedCarriersLabel.text = @"Trusted Carriers";
+    trustedCarriersLabel.textColor = [UIColor labelColor];
+    trustedCarriersLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    trustedCarriersLabel.adjustsFontForContentSizeCategory = YES;
+    trustedCarriersLabel.userInteractionEnabled = NO;
+    trustedCarriersLabel.accessibilityElementsHidden = YES;
+    [self.trustedCarriersButton addSubview:trustedCarriersLabel];
+
+    self.trustedCarriersSummaryLabel = [[UILabel alloc] init];
+    self.trustedCarriersSummaryLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.trustedCarriersSummaryLabel.textColor = [UIColor secondaryLabelColor];
+    self.trustedCarriersSummaryLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    self.trustedCarriersSummaryLabel.adjustsFontForContentSizeCategory = YES;
+    self.trustedCarriersSummaryLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    self.trustedCarriersSummaryLabel.userInteractionEnabled = NO;
+    self.trustedCarriersSummaryLabel.accessibilityElementsHidden = YES;
+    [self.trustedCarriersButton addSubview:self.trustedCarriersSummaryLabel];
+
+    UIImageView *chevronImageView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.right"]];
+    chevronImageView.translatesAutoresizingMaskIntoConstraints = NO;
+    chevronImageView.tintColor = [UIColor tertiaryLabelColor];
+    chevronImageView.contentMode = UIViewContentModeScaleAspectFit;
+    chevronImageView.accessibilityElementsHidden = YES;
+    [self.trustedCarriersButton addSubview:chevronImageView];
+
+    UIView *generatedCarrierContainer = [[UIView alloc] init];
+    generatedCarrierContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    generatedCarrierContainer.backgroundColor = [UIColor clearColor];
+    [self.carrierSelectionContainer addSubview:generatedCarrierContainer];
+
+    UILabel *generatedCarrierTitleLabel = [[UILabel alloc] init];
+    generatedCarrierTitleLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    generatedCarrierTitleLabel.text = @"Current carrier";
+    generatedCarrierTitleLabel.textColor = [UIColor secondaryLabelColor];
+    generatedCarrierTitleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    generatedCarrierTitleLabel.adjustsFontForContentSizeCategory = YES;
+    generatedCarrierTitleLabel.accessibilityElementsHidden = YES;
+    [generatedCarrierContainer addSubview:generatedCarrierTitleLabel];
+
+    self.generatedCarrierStatusLabel = [[UILabel alloc] init];
+    self.generatedCarrierStatusLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.generatedCarrierStatusLabel.textColor = [UIColor labelColor];
+    self.generatedCarrierStatusLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+    self.generatedCarrierStatusLabel.adjustsFontForContentSizeCategory = YES;
+    self.generatedCarrierStatusLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    self.generatedCarrierStatusLabel.text = @"No generated carrier yet";
+    self.generatedCarrierStatusLabel.accessibilityLabel = @"Current carrier. No generated carrier yet.";
+    self.generatedCarrierStatusLabel.accessibilityTraits = UIAccessibilityTraitStaticText;
+    [generatedCarrierContainer addSubview:self.generatedCarrierStatusLabel];
     
     // Create local IP container for WiFi connection type
     self.localIPContainer = [[UIView alloc] init];
@@ -1754,282 +1712,101 @@
     [self.localIPGenerateButton addTarget:self action:@selector(localIPGenerateButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
     [ipv4Row addSubview:self.localIPGenerateButton];
     
-    // Create carrier details container
-    self.carrierDetailsContainer = [[UIView alloc] init];
-    self.carrierDetailsContainer.translatesAutoresizingMaskIntoConstraints = NO;
-    self.carrierDetailsContainer.backgroundColor = [UIColor clearColor];
-    [controlView.contentView addSubview:self.carrierDetailsContainer];
-    
-    // Create carrier name field with label
-    UILabel *carrierNameLabel = [[UILabel alloc] init];
-    carrierNameLabel.text = @"Carrier:";
-    carrierNameLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
-    carrierNameLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.carrierDetailsContainer addSubview:carrierNameLabel];
-    
-    self.carrierNameField = [[UITextField alloc] init];
-    self.carrierNameField.borderStyle = UITextBorderStyleRoundedRect;
-    self.carrierNameField.font = [UIFont systemFontOfSize:12];
-    self.carrierNameField.translatesAutoresizingMaskIntoConstraints = NO;
-    self.carrierNameField.placeholder = @"Carrier name";
-    self.carrierNameField.returnKeyType = UIReturnKeyDone;
-    self.carrierNameField.clearButtonMode = UITextFieldViewModeWhileEditing;
-    self.carrierNameField.delegate = self; // Set delegate to handle return key
-    [self.carrierNameField addTarget:self action:@selector(carrierFieldChanged:) forControlEvents:UIControlEventEditingChanged];
-    [self.carrierDetailsContainer addSubview:self.carrierNameField];
-    
-    // Create MCC field with label
-    UILabel *mccLabel = [[UILabel alloc] init];
-    mccLabel.text = @"MCC:";
-    mccLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
-    mccLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.carrierDetailsContainer addSubview:mccLabel];
-    
-    self.mccField = [[UITextField alloc] init];
-    self.mccField.borderStyle = UITextBorderStyleRoundedRect;
-    self.mccField.font = [UIFont systemFontOfSize:12];
-    self.mccField.translatesAutoresizingMaskIntoConstraints = NO;
-    self.mccField.placeholder = @"MCC";
-    self.mccField.keyboardType = UIKeyboardTypeNumberPad;
-    self.mccField.returnKeyType = UIReturnKeyDone;
-    self.mccField.clearButtonMode = UITextFieldViewModeWhileEditing;
-    self.mccField.delegate = self; // Set delegate to handle return key
-    [self.mccField addTarget:self action:@selector(carrierFieldChanged:) forControlEvents:UIControlEventEditingChanged];
-    // Add toolbar for number pad to dismiss keyboard
-    [self addDoneButtonToNumberPad:self.mccField];
-    [self.carrierDetailsContainer addSubview:self.mccField];
-    
-    // Create MNC field with label
-    UILabel *mncLabel = [[UILabel alloc] init];
-    mncLabel.text = @"MNC:";
-    mncLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
-    mncLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.carrierDetailsContainer addSubview:mncLabel];
-    
-    self.mncField = [[UITextField alloc] init];
-    self.mncField.borderStyle = UITextBorderStyleRoundedRect;
-    self.mncField.font = [UIFont systemFontOfSize:12];
-    self.mncField.translatesAutoresizingMaskIntoConstraints = NO;
-    self.mncField.placeholder = @"MNC";
-    self.mncField.keyboardType = UIKeyboardTypeNumberPad;
-    self.mncField.returnKeyType = UIReturnKeyDone;
-    self.mncField.clearButtonMode = UITextFieldViewModeWhileEditing;
-    self.mncField.delegate = self; // Set delegate to handle return key
-    [self.mncField addTarget:self action:@selector(carrierFieldChanged:) forControlEvents:UIControlEventEditingChanged];
-    // Add toolbar for number pad to dismiss keyboard
-    [self addDoneButtonToNumberPad:self.mncField];
-    [self.carrierDetailsContainer addSubview:self.mncField];
-    
-    // We're using the quick generate button instead of a separate one in the carrier details row
-    
-    // Position control under the network data spoof control
+    // Position control under the network data spoof control.
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:340], // Position below Network Data Spoof control
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:340],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
-        [controlView.heightAnchor constraintEqualToConstant:200], // Increased height to accommodate carrier details and local IP
-        
-        // Position label at the top with info button beside it
+        [controlView.heightAnchor constraintEqualToConstant:200],
+
         [self.networkConnectionTypeLabel.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
         [self.networkConnectionTypeLabel.topAnchor constraintEqualToAnchor:controlView.contentView.topAnchor constant:15],
-        
         [infoBgView.leadingAnchor constraintEqualToAnchor:self.networkConnectionTypeLabel.trailingAnchor constant:10],
         [infoBgView.centerYAnchor constraintEqualToAnchor:self.networkConnectionTypeLabel.centerYAnchor],
         [infoBgView.widthAnchor constraintEqualToConstant:24],
         [infoBgView.heightAnchor constraintEqualToConstant:24],
-        
         [self.networkConnectionTypeInfoButton.centerXAnchor constraintEqualToAnchor:infoBgView.centerXAnchor],
         [self.networkConnectionTypeInfoButton.centerYAnchor constraintEqualToAnchor:infoBgView.centerYAnchor],
-        
-        // Position segmented control below the label, centered horizontally
+
         [self.networkConnectionTypeSegment.centerXAnchor constraintEqualToAnchor:controlView.contentView.centerXAnchor],
         [self.networkConnectionTypeSegment.topAnchor constraintEqualToAnchor:self.networkConnectionTypeLabel.bottomAnchor constant:15],
-        [self.networkConnectionTypeSegment.widthAnchor constraintEqualToConstant:250], // Wider segmented control
-        
-        // Position ISO container below network connection type
-        [isoContainer.centerXAnchor constraintEqualToAnchor:controlView.contentView.centerXAnchor],
-        [isoContainer.topAnchor constraintEqualToAnchor:self.networkConnectionTypeSegment.bottomAnchor constant:15],
-        [isoContainer.heightAnchor constraintEqualToConstant:30],
-        
-        // Position elements inside container
-        [self.networkISOCountrySegment.leadingAnchor constraintEqualToAnchor:isoContainer.leadingAnchor],
-        [self.networkISOCountrySegment.centerYAnchor constraintEqualToAnchor:isoContainer.centerYAnchor],
-        [self.networkISOCountrySegment.widthAnchor constraintEqualToConstant:120],
-        
-        [self.customISOButton.leadingAnchor constraintEqualToAnchor:self.networkISOCountrySegment.trailingAnchor constant:8],
-        [self.customISOButton.centerYAnchor constraintEqualToAnchor:isoContainer.centerYAnchor],
-        [self.customISOButton.widthAnchor constraintGreaterThanOrEqualToConstant:80],
-        [self.customISOButton.heightAnchor constraintEqualToConstant:30],
-        
-        // Position generate icon button next to custom button
-        [self.quickGenerateButton.leadingAnchor constraintEqualToAnchor:self.customISOButton.trailingAnchor constant:8],
-        [self.quickGenerateButton.centerYAnchor constraintEqualToAnchor:isoContainer.centerYAnchor],
-        [self.quickGenerateButton.trailingAnchor constraintEqualToAnchor:isoContainer.trailingAnchor],
-        [self.quickGenerateButton.widthAnchor constraintEqualToConstant:36],
-        [self.quickGenerateButton.heightAnchor constraintEqualToConstant:30],
-        
-        // Position carrier details container below ISO container
-        [self.carrierDetailsContainer.topAnchor constraintEqualToAnchor:isoContainer.bottomAnchor constant:10],
-        [self.carrierDetailsContainer.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
-        [self.carrierDetailsContainer.trailingAnchor constraintEqualToAnchor:controlView.contentView.trailingAnchor constant:-20],
-        [self.carrierDetailsContainer.heightAnchor constraintEqualToConstant:30],
-        
-        // Position local IP container just below the WiFi segmented control
+        [self.networkConnectionTypeSegment.widthAnchor constraintLessThanOrEqualToAnchor:controlView.contentView.widthAnchor constant:-32],
+
+        [self.carrierSelectionContainer.topAnchor constraintEqualToAnchor:self.networkConnectionTypeSegment.bottomAnchor constant:12],
+        [self.carrierSelectionContainer.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
+        [self.carrierSelectionContainer.trailingAnchor constraintEqualToAnchor:controlView.contentView.trailingAnchor constant:-20],
+        [self.carrierSelectionContainer.bottomAnchor constraintEqualToAnchor:controlView.contentView.bottomAnchor constant:-12],
+
+        [self.trustedCarriersButton.topAnchor constraintEqualToAnchor:self.carrierSelectionContainer.topAnchor],
+        [self.trustedCarriersButton.leadingAnchor constraintEqualToAnchor:self.carrierSelectionContainer.leadingAnchor],
+        [self.trustedCarriersButton.trailingAnchor constraintEqualToAnchor:self.carrierSelectionContainer.trailingAnchor],
+        [self.trustedCarriersButton.heightAnchor constraintGreaterThanOrEqualToConstant:48],
+        [trustedCarriersLabel.leadingAnchor constraintEqualToAnchor:self.trustedCarriersButton.leadingAnchor constant:16],
+        [trustedCarriersLabel.topAnchor constraintEqualToAnchor:self.trustedCarriersButton.topAnchor constant:8],
+        [self.trustedCarriersSummaryLabel.leadingAnchor constraintEqualToAnchor:trustedCarriersLabel.leadingAnchor],
+        [self.trustedCarriersSummaryLabel.topAnchor constraintEqualToAnchor:trustedCarriersLabel.bottomAnchor constant:2],
+        [self.trustedCarriersSummaryLabel.trailingAnchor constraintLessThanOrEqualToAnchor:chevronImageView.leadingAnchor constant:-8],
+        [chevronImageView.centerYAnchor constraintEqualToAnchor:self.trustedCarriersButton.centerYAnchor],
+        [chevronImageView.trailingAnchor constraintEqualToAnchor:self.trustedCarriersButton.trailingAnchor constant:-16],
+        [chevronImageView.widthAnchor constraintEqualToConstant:12],
+        [chevronImageView.heightAnchor constraintEqualToConstant:16],
+
+        [generatedCarrierContainer.topAnchor constraintEqualToAnchor:self.trustedCarriersButton.bottomAnchor constant:4],
+        [generatedCarrierContainer.leadingAnchor constraintEqualToAnchor:self.carrierSelectionContainer.leadingAnchor],
+        [generatedCarrierContainer.trailingAnchor constraintEqualToAnchor:self.carrierSelectionContainer.trailingAnchor],
+        [generatedCarrierContainer.bottomAnchor constraintEqualToAnchor:self.carrierSelectionContainer.bottomAnchor],
+        [generatedCarrierContainer.heightAnchor constraintGreaterThanOrEqualToConstant:44],
+        [generatedCarrierTitleLabel.leadingAnchor constraintEqualToAnchor:generatedCarrierContainer.leadingAnchor],
+        [generatedCarrierTitleLabel.centerYAnchor constraintEqualToAnchor:generatedCarrierContainer.centerYAnchor],
+        [self.generatedCarrierStatusLabel.leadingAnchor constraintEqualToAnchor:generatedCarrierTitleLabel.trailingAnchor constant:8],
+        [self.generatedCarrierStatusLabel.centerYAnchor constraintEqualToAnchor:generatedCarrierContainer.centerYAnchor],
+        [self.generatedCarrierStatusLabel.trailingAnchor constraintEqualToAnchor:generatedCarrierContainer.trailingAnchor],
+
         [self.localIPContainer.topAnchor constraintEqualToAnchor:self.networkConnectionTypeSegment.bottomAnchor constant:22],
         [self.localIPContainer.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
         [self.localIPContainer.trailingAnchor constraintEqualToAnchor:controlView.contentView.trailingAnchor constant:-20],
-        [self.localIPContainer.heightAnchor constraintEqualToConstant:85], // Increased height for two rows with spacing
-        
-        // Position carrier name label and field
-        [carrierNameLabel.leadingAnchor constraintEqualToAnchor:self.carrierDetailsContainer.leadingAnchor],
-        [carrierNameLabel.centerYAnchor constraintEqualToAnchor:self.carrierDetailsContainer.centerYAnchor],
-        [carrierNameLabel.widthAnchor constraintEqualToConstant:45],
-        
-        [self.carrierNameField.leadingAnchor constraintEqualToAnchor:carrierNameLabel.trailingAnchor constant:5],
-        [self.carrierNameField.centerYAnchor constraintEqualToAnchor:self.carrierDetailsContainer.centerYAnchor],
-        [self.carrierNameField.widthAnchor constraintEqualToConstant:80],
-        [self.carrierNameField.heightAnchor constraintEqualToConstant:25],
-        
-        // Position MCC label and field
-        [mccLabel.leadingAnchor constraintEqualToAnchor:self.carrierNameField.trailingAnchor constant:8],
-        [mccLabel.centerYAnchor constraintEqualToAnchor:self.carrierDetailsContainer.centerYAnchor],
-        [mccLabel.widthAnchor constraintEqualToConstant:35],
-        
-        [self.mccField.leadingAnchor constraintEqualToAnchor:mccLabel.trailingAnchor constant:2],
-        [self.mccField.centerYAnchor constraintEqualToAnchor:self.carrierDetailsContainer.centerYAnchor],
-        [self.mccField.widthAnchor constraintEqualToConstant:40],
-        [self.mccField.heightAnchor constraintEqualToConstant:25],
-        
-        // Position MNC label and field
-        [mncLabel.leadingAnchor constraintEqualToAnchor:self.mccField.trailingAnchor constant:8],
-        [mncLabel.centerYAnchor constraintEqualToAnchor:self.carrierDetailsContainer.centerYAnchor],
-        [mncLabel.widthAnchor constraintEqualToConstant:35],
-        
-        [self.mncField.leadingAnchor constraintEqualToAnchor:mncLabel.trailingAnchor constant:2],
-        [self.mncField.centerYAnchor constraintEqualToAnchor:self.carrierDetailsContainer.centerYAnchor],
-        [self.mncField.trailingAnchor constraintLessThanOrEqualToAnchor:self.carrierDetailsContainer.trailingAnchor constant:-10],
-        [self.mncField.widthAnchor constraintEqualToConstant:40],
-        [self.mncField.heightAnchor constraintEqualToConstant:25],
-        
-        // Position the vertical stack for local IP elements
+        [self.localIPContainer.heightAnchor constraintEqualToConstant:85],
         [localIPStack.leadingAnchor constraintEqualToAnchor:self.localIPContainer.leadingAnchor],
-        [localIPStack.topAnchor constraintEqualToAnchor:self.localIPContainer.topAnchor constant:5], // Add slight top margin
+        [localIPStack.topAnchor constraintEqualToAnchor:self.localIPContainer.topAnchor constant:5],
         [localIPStack.trailingAnchor constraintEqualToAnchor:self.localIPContainer.trailingAnchor],
         [localIPStack.bottomAnchor constraintEqualToAnchor:self.localIPContainer.bottomAnchor],
-        
-        // Position the IP vertical stack inside the localIPStack
         [ipVerticalStack.leadingAnchor constraintEqualToAnchor:localIPStack.leadingAnchor],
         [ipVerticalStack.topAnchor constraintEqualToAnchor:localIPStack.topAnchor],
         [ipVerticalStack.trailingAnchor constraintEqualToAnchor:localIPStack.trailingAnchor],
         [ipVerticalStack.bottomAnchor constraintEqualToAnchor:localIPStack.bottomAnchor],
-        
-        // IPv6 row constraints
         [ipv6Row.heightAnchor constraintEqualToConstant:30],
         [ipv6Row.leadingAnchor constraintEqualToAnchor:ipVerticalStack.leadingAnchor],
         [ipv6Row.trailingAnchor constraintEqualToAnchor:ipVerticalStack.trailingAnchor],
-        
-        // IPv4 row constraints
         [ipv4Row.heightAnchor constraintEqualToConstant:30],
         [ipv4Row.leadingAnchor constraintEqualToAnchor:ipVerticalStack.leadingAnchor],
         [ipv4Row.trailingAnchor constraintEqualToAnchor:ipVerticalStack.trailingAnchor],
-        
-        // IPv6 elements
         [localIPv6Label.leadingAnchor constraintEqualToAnchor:ipv6Row.leadingAnchor],
         [localIPv6Label.centerYAnchor constraintEqualToAnchor:ipv6Row.centerYAnchor],
         [localIPv6Label.widthAnchor constraintEqualToConstant:80],
-        
         [self.localIPv6Field.leadingAnchor constraintEqualToAnchor:localIPv6Label.trailingAnchor constant:5],
         [self.localIPv6Field.centerYAnchor constraintEqualToAnchor:ipv6Row.centerYAnchor],
-        [self.localIPv6Field.widthAnchor constraintEqualToConstant:160],
+        [self.localIPv6Field.trailingAnchor constraintEqualToAnchor:self.localIPv6GenerateButton.leadingAnchor constant:-10],
         [self.localIPv6Field.heightAnchor constraintEqualToConstant:25],
-        
-        [self.localIPv6GenerateButton.leadingAnchor constraintEqualToAnchor:self.localIPv6Field.trailingAnchor constant:10],
+        [self.localIPv6GenerateButton.trailingAnchor constraintEqualToAnchor:ipv6Row.trailingAnchor],
         [self.localIPv6GenerateButton.centerYAnchor constraintEqualToAnchor:ipv6Row.centerYAnchor],
         [self.localIPv6GenerateButton.widthAnchor constraintEqualToConstant:36],
         [self.localIPv6GenerateButton.heightAnchor constraintEqualToConstant:30],
-        
-        // IPv4 elements
         [localIPLabel.leadingAnchor constraintEqualToAnchor:ipv4Row.leadingAnchor],
         [localIPLabel.centerYAnchor constraintEqualToAnchor:ipv4Row.centerYAnchor],
         [localIPLabel.widthAnchor constraintEqualToConstant:80],
-        
         [self.localIPField.leadingAnchor constraintEqualToAnchor:localIPLabel.trailingAnchor constant:5],
         [self.localIPField.centerYAnchor constraintEqualToAnchor:ipv4Row.centerYAnchor],
-        [self.localIPField.widthAnchor constraintEqualToConstant:160],
+        [self.localIPField.trailingAnchor constraintEqualToAnchor:self.localIPGenerateButton.leadingAnchor constant:-10],
         [self.localIPField.heightAnchor constraintEqualToConstant:25],
-        
-        [self.localIPGenerateButton.leadingAnchor constraintEqualToAnchor:self.localIPField.trailingAnchor constant:10],
+        [self.localIPGenerateButton.trailingAnchor constraintEqualToAnchor:ipv4Row.trailingAnchor],
         [self.localIPGenerateButton.centerYAnchor constraintEqualToAnchor:ipv4Row.centerYAnchor],
         [self.localIPGenerateButton.widthAnchor constraintEqualToConstant:36],
         [self.localIPGenerateButton.heightAnchor constraintEqualToConstant:30]
     ]];
 
-    // Show/hide ISO segment based on selection
-    if (!self.networkISOCountrySegment) return;
-    BOOL showISO = (savedConnectionType == 2);
-    BOOL showLocalIP = (savedConnectionType == 1);
-    
-    self.networkISOCountrySegment.hidden = !showISO;
-    self.networkISOCountrySegment.enabled = (self.networkConnectionTypeSegment.enabled && showISO);
-    
-    // Also show/hide the custom ISO button
-    if (self.customISOButton) {
-        self.customISOButton.hidden = !showISO;
-        self.customISOButton.enabled = (self.networkConnectionTypeSegment.enabled && showISO);
-    }
-    
-    // Show/hide the quick generate button
-    if (self.quickGenerateButton) {
-        self.quickGenerateButton.hidden = !showISO;
-        self.quickGenerateButton.enabled = (self.networkConnectionTypeSegment.enabled && showISO);
-    }
-    
-    // Show/hide the container
-    isoContainer.hidden = !showISO;
-    
-    // Show/hide carrier details container
-    self.carrierDetailsContainer.hidden = !showISO;
-    
-    // Show/hide local IP container based on WiFi selection
-    self.localIPContainer.hidden = !showLocalIP;
-    
-    // Load saved carrier values or generate new ones
-    if (showISO) {
-        // Get saved carrier details from profile-based storage
-        NSDictionary *carrierDetails = [NetworkManager getSavedCarrierDetails];
-        
-        if (carrierDetails) {
-            self.carrierNameField.text = carrierDetails[@"name"];
-            self.mccField.text = carrierDetails[@"mcc"];
-            self.mncField.text = carrierDetails[@"mnc"];
-        } else {
-            // If for some reason we couldn't get carrier details, generate new ones
-            [self updateCarrierDetailsForCountry:savedISO];
-        }
-        
-        // Enable fields only for custom country
-        BOOL isCustomCountry = ![savedISO isEqualToString:@"us"] && 
-                               ![savedISO isEqualToString:@"in"] && 
-                               ![savedISO isEqualToString:@"ca"];
-        
-        self.carrierNameField.enabled = isCustomCountry;
-        self.mccField.enabled = isCustomCountry;
-        self.mncField.enabled = isCustomCountry;
-    }
-    
-    // Load saved local IP or generate one if WiFi is selected
-    if (showLocalIP) {
-        NSString *savedLocalIPv6 = [NetworkManager getSavedLocalIPv6Address];
-        self.localIPv6Field.text = savedLocalIPv6;
-        
-        NSString *savedLocalIP = [NetworkManager getSavedLocalIPAddress];
-        self.localIPField.text = savedLocalIP;
-    }
-
-    // No longer needed - moved to the vertical stack layout above
-
-    // Methods for field change and generate button have been moved to top-level
-    // No nested methods here
+    [self prepareTrustedCarrierSelectionForPresentation];
+    [self updateNetworkCarrierPresentationForConnectionType:savedConnectionType networkDataSpoofEnabled:networkDataSpoofEnabled];
+    [self refreshNetworkIdentifiers];
 }
 
 - (void)matrixToggleChanged:(UISwitch *)sender {
@@ -2148,7 +1925,7 @@
     BOOL enabled = sender.isOn;
     
     // 1. Update plist file - THE SOURCE OF TRUTH
-    NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+    NSString *securitySettingsPath = PXSecuritySettingsPath();
     NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
     settingsDict[@"networkDataSpoofEnabled"] = @(enabled);
     
@@ -2180,6 +1957,8 @@
         connectionTypeView.alpha = enabled ? 0.8 : 0.4;
         self.networkConnectionTypeSegment.enabled = enabled;
     }
+    [self updateNetworkCarrierPresentationForConnectionType:self.networkConnectionTypeSegment.selectedSegmentIndex
+                                    networkDataSpoofEnabled:enabled];
     
     // 4. Send notifications with enhanced information
     NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
@@ -2417,56 +2196,6 @@
     [self presentViewController:alertController animated:YES completion:nil];
 }
 
-- (void)networkISOCountryChanged:(UISegmentedControl *)sender {
-    // Save ISO code to user defaults (keeping this in user defaults as it's a UI preference, not device identity)
-    NSString *selectedISO = @"us";
-    switch (sender.selectedSegmentIndex) {
-        case 0: selectedISO = @"us"; break;
-        case 1: selectedISO = @"in"; break;
-        case 2: selectedISO = @"ca"; break;
-        default: {
-            // If no segment is selected, keep the existing custom code
-            selectedISO = [self.securitySettings stringForKey:@"networkISOCountryCode"] ?: @"us";
-            // But don't allow going back to "no selection" without a valid code
-            if ([selectedISO isEqualToString:@"us"] || [selectedISO isEqualToString:@"in"] || [selectedISO isEqualToString:@"ca"]) {
-                selectedISO = @"us"; // Default to US
-                sender.selectedSegmentIndex = 0;
-            }
-            break;
-        }
-    }
-    
-    [self.securitySettings setObject:selectedISO forKey:@"networkISOCountryCode"];
-    [self.securitySettings synchronize];
-    
-    // Reset the custom button style if a standard option is selected
-    if (sender.selectedSegmentIndex >= 0) {
-        [self.customISOButton setTitle:@"Custom" forState:UIControlStateNormal];
-        [self.customISOButton setTitleColor:[UIColor labelColor] forState:UIControlStateNormal];
-        
-        if (@available(iOS 13.0, *)) {
-            self.customISOButton.backgroundColor = [UIColor systemGray5Color];
-        } else {
-            self.customISOButton.backgroundColor = [UIColor systemBackgroundColor];
-        }
-    }
-    
-    // Update carrier details for the selected country
-    [self updateCarrierDetailsForCountry:selectedISO];
-    
-    // Log the change
-    PXLog(@"[SecurityTab] ISO Country Code changed to: %@ (index: %ld)", selectedISO, (long)sender.selectedSegmentIndex);
-    
-    // Send notification for updates
-    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
-    CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.networkISOCountryCodeChanged"), NULL, NULL, YES);
-    
-    // Haptic feedback
-    UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-    [generator prepare];
-    [generator impactOccurred];
-}
-
 - (void)networkConnectionTypeChanged:(UISegmentedControl *)sender {
     NSInteger selectedType = sender.selectedSegmentIndex;
     
@@ -2501,47 +2230,8 @@
             break;
     }
     
-    // Show/hide ISO country code segment based on selection
-    if (!self.networkISOCountrySegment) return;
-    BOOL showISO = (selectedType == 2);
-    self.networkISOCountrySegment.hidden = !showISO;
-    self.networkISOCountrySegment.enabled = (self.networkConnectionTypeSegment.enabled && showISO);
-    
-    // Also show/hide the custom ISO button
-    if (self.customISOButton) {
-        self.customISOButton.hidden = !showISO;
-        self.customISOButton.enabled = (self.networkConnectionTypeSegment.enabled && showISO);
-    }
-    
-    // Also show/hide the quick generate button
-    if (self.quickGenerateButton) {
-        self.quickGenerateButton.hidden = !showISO;
-        self.quickGenerateButton.enabled = (self.networkConnectionTypeSegment.enabled && showISO);
-    }
-    
-    // Also show/hide the ISO container
-    UIView *isoContainer = self.networkISOCountrySegment.superview;
-    if (isoContainer != self.networkConnectionTypeSegment.superview) {
-        isoContainer.hidden = !showISO;
-    }
-    
-    // Show/hide the carrier details container
-    if (self.carrierDetailsContainer) {
-        self.carrierDetailsContainer.hidden = !showISO;
-    }
-    
-    // Show/hide the local IP container for WiFi connection type
-    if (self.localIPContainer) {
-        BOOL showLocalIP = (selectedType == 1); // Show for WiFi (index 1)
-        self.localIPContainer.hidden = !showLocalIP;
-        
-        // If WiFi is selected, initialize the local IP field with real IP or saved value
-        if (showLocalIP) {
-            // Get the saved local IP from the profile-based storage
-            NSString *savedLocalIP = [NetworkManager getSavedLocalIPAddress];
-            self.localIPField.text = savedLocalIP;
-        }
-    }
+    [self updateNetworkCarrierPresentationForConnectionType:selectedType
+                                    networkDataSpoofEnabled:self.networkConnectionTypeSegment.enabled];
 
     // Show feedback toast
     UIWindow *keyWindow = nil;
@@ -3060,20 +2750,19 @@
 
 // Method to dismiss keyboard when tapping outside text fields
 - (void)dismissKeyboard {
-    // End editing for carrier fields
-    [self.carrierNameField resignFirstResponder];
-    [self.mccField resignFirstResponder];
-    [self.mncField resignFirstResponder];
-    
-    // End editing for local IP field
     [self.localIPField resignFirstResponder];
+    [self.localIPv6Field resignFirstResponder];
 }
 
 - (void)vpnDetectionToggleChanged:(UISwitch *)sender {
     BOOL enabled = sender.isOn;
     [self.securitySettings setBool:enabled forKey:@"vpnDetectionBypassEnabled"];
     [self.securitySettings synchronize];
-    // TODO: Add logic to enable/disable VPN/Proxy detection bypass in your backend
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         CFSTR("com.hydra.projectx.vpnDetectionBypassChanged"),
+                                         NULL,
+                                         NULL,
+                                         YES);
 }
 
 - (void)showVPNDetectionInfo {
@@ -3786,193 +3475,144 @@
     [self presentViewController:alert animated:YES completion:nil];
 }
 
-// Add new method to handle custom ISO code input
-- (void)showCustomISOPrompt {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Custom ISO Country Code"
-                                                                   message:@"Enter a two-letter ISO country code (e.g., GB, DE, JP)"
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-        textField.placeholder = @"ISO Code (2 letters)";
-        textField.text = [self.securitySettings stringForKey:@"networkISOCountryCode"] ?: @"";
-        textField.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters;
-        textField.autocorrectionType = UITextAutocorrectionTypeNo;
-        textField.keyboardType = UIKeyboardTypeASCIICapable;
-        textField.returnKeyType = UIReturnKeyDone;
-        textField.clearButtonMode = UITextFieldViewModeWhileEditing;
-    }];
-    
-    UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil];
-    
-    UIAlertAction *saveAction = [UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-        UITextField *textField = alert.textFields.firstObject;
-        NSString *isoCode = [textField.text stringByReplacingOccurrencesOfString:@" " withString:@""];
-        isoCode = [isoCode lowercaseString];
-        
-        // Validate ISO code format (2 letters)
-        if (isoCode.length == 2 && [self isValidISOCountryCode:isoCode]) {
-            // Deselect any selected segment
-            [self.networkISOCountrySegment setSelectedSegmentIndex:UISegmentedControlNoSegment];
-            
-            // Save to user defaults
-            [self.securitySettings setObject:isoCode forKey:@"networkISOCountryCode"];
-            [self.securitySettings synchronize];
-            
-            // Update custom button title
-            [self.customISOButton setTitle:[NSString stringWithFormat:@"Custom: %@", [isoCode uppercaseString]] forState:UIControlStateNormal];
-            
-            // Highlight the custom button like selected segment
-            if (@available(iOS 13.0, *)) {
-                self.customISOButton.backgroundColor = [UIColor systemBlueColor];
-                [self.customISOButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-            } else {
-                self.customISOButton.backgroundColor = [UIColor systemBlueColor];
-                [self.customISOButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+// Trusted-carrier presentation keeps technical catalog fields out of the UI.
+- (PXTrustedCarrierPolicyStore *)trustedCarrierPolicyStoreForCurrentProfile {
+    Profile *currentProfile = [ProfileManager sharedManager].currentProfile;
+    if (!currentProfile) {
+        return nil;
+    }
+    NSString *profileDirectory = [[ProfileManager sharedManager] profileDirectoryForProfile:currentProfile];
+    return [[PXTrustedCarrierPolicyStore alloc] initWithProfileDirectory:profileDirectory];
+}
+
+- (void)prepareTrustedCarrierSelectionForPresentation {
+    if (!self.trustedCarrierOptions) {
+        NSMutableArray<PXTrustedCarrierOption *> *options = [NSMutableArray array];
+        for (NSDictionary<NSString *, id> *carrier in PXCarrierCatalog()) {
+            NSString *carrierID = carrier[@"carrierID"];
+            NSString *countryName = carrier[@"country"];
+            NSString *carrierName = carrier[@"name"];
+            if (carrierID.length == 0 || countryName.length == 0 || carrierName.length == 0) {
+                continue;
             }
-            
-            // Update carrier details for custom country
-            [self updateCarrierDetailsForCountry:isoCode];
-            
-            // Log the change
-            PXLog(@"[SecurityTab] ISO Country Code changed to custom value: %@", isoCode);
-            
-            // Send notification for updates
-            CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
-            CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.networkISOCountryCodeChanged"), NULL, NULL, YES);
-            
-            // Add haptic feedback
-            UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-            [generator prepare];
-            [generator impactOccurred];
-        } else {
-            // Show error for invalid ISO code
-            UIAlertController *errorAlert = [UIAlertController alertControllerWithTitle:@"Invalid ISO Code"
-                                                                               message:@"Please enter a valid two-letter ISO country code (e.g., GB, DE, JP)"
-                                                                        preferredStyle:UIAlertControllerStyleAlert];
-            
-            [errorAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-                // Re-show the input prompt after dismissing the error
-                [self showCustomISOPrompt];
-            }]];
-            
-            [self presentViewController:errorAlert animated:YES completion:nil];
+            [options addObject:[[PXTrustedCarrierOption alloc]
+                initWithStableIdentifier:carrierID
+                countryName:countryName
+                carrierName:carrierName]];
         }
-    }];
-    
-    [alert addAction:cancelAction];
-    [alert addAction:saveAction];
-    
-    [self presentViewController:alert animated:YES completion:nil];
+        self.trustedCarrierOptions = [options copy];
+    }
+
+    NSError *policyError = nil;
+    PXTrustedCarrierPolicyStore *policyStore = [self trustedCarrierPolicyStoreForCurrentProfile];
+    NSSet<NSString *> *persistedCarrierIDs = [policyStore trustedCarrierIDsWithError:&policyError];
+    if (persistedCarrierIDs) {
+        self.selectedTrustedCarrierIDs = persistedCarrierIDs;
+    } else {
+        NSMutableSet<NSString *> *allCatalogCarrierIDs = [NSMutableSet setWithCapacity:self.trustedCarrierOptions.count];
+        for (PXTrustedCarrierOption *option in self.trustedCarrierOptions) {
+            [allCatalogCarrierIDs addObject:option.stableIdentifier];
+        }
+        self.selectedTrustedCarrierIDs = [allCatalogCarrierIDs copy];
+        if (policyError) {
+            PXLog(@"[SecurityTab] Failed to load trusted Carrier policy: %@", policyError.localizedDescription);
+        }
+    }
+
+    [self updateTrustedCarrierSummary];
 }
 
-// Helper method to validate ISO country code
-- (BOOL)isValidISOCountryCode:(NSString *)code {
-    // Simple validation - must be 2 letters
-    if (code.length != 2) return NO;
-    
-    // Check if all characters are letters
-    NSCharacterSet *nonLetterSet = [[NSCharacterSet letterCharacterSet] invertedSet];
-    return ([code rangeOfCharacterFromSet:nonLetterSet].location == NSNotFound);
+- (void)trustedCarriersButtonTapped:(UIButton *)sender {
+    [self prepareTrustedCarrierSelectionForPresentation];
+    CarrierSelectionViewController *carrierSelectionViewController = [[CarrierSelectionViewController alloc] initWithCarrierOptions:self.trustedCarrierOptions ?: @[]
+                                                                                                         selectedCarrierIDs:self.selectedTrustedCarrierIDs ?: [NSSet set]];
+    carrierSelectionViewController.delegate = self;
+
+    UINavigationController *navigationController = [[UINavigationController alloc] initWithRootViewController:carrierSelectionViewController];
+    navigationController.modalPresentationStyle = UIModalPresentationPageSheet;
+    if (@available(iOS 15.0, *)) {
+        UISheetPresentationController *sheetPresentationController = navigationController.sheetPresentationController;
+        sheetPresentationController.detents = @[UISheetPresentationControllerDetent.mediumDetent, UISheetPresentationControllerDetent.largeDetent];
+        sheetPresentationController.prefersGrabberVisible = YES;
+    }
+    [self presentViewController:navigationController animated:YES completion:nil];
 }
 
-// Add method to generate carrier info based on country code
-- (NSDictionary *)generateCarrierInfoForCountry:(NSString *)countryCode {
-    // Use the NetworkManager class to get a random carrier for the country
-    return [NetworkManager getRandomCarrierForCountry:countryCode];
-}
-
-// Method to update the carrier details UI fields
-- (void)updateCarrierDetailsForCountry:(NSString *)countryCode {
-    if (!self.carrierNameField || !self.mccField || !self.mncField) {
+- (void)carrierSelectionViewController:(CarrierSelectionViewController *)viewController
+         didCommitSelectedCarrierIDs:(NSSet<NSString *> *)selectedCarrierIDs {
+    NSError *policyError = nil;
+    PXTrustedCarrierPolicyStore *policyStore = [self trustedCarrierPolicyStoreForCurrentProfile];
+    if (!policyStore || ![policyStore saveTrustedCarrierIDs:selectedCarrierIDs error:&policyError]) {
+        [self showToastWithMessage:policyError.localizedDescription ?: @"Unable to save trusted Carriers"];
         return;
     }
-    
-    // Generate information for the country
-    NSDictionary *carrierInfo = [self generateCarrierInfoForCountry:countryCode];
-    
-    // Update UI
-    self.carrierNameField.text = carrierInfo[@"name"];
-    self.mccField.text = carrierInfo[@"mcc"];
-    self.mncField.text = carrierInfo[@"mnc"];
-    
-    // Save values to profile-based storage
-    [NetworkManager saveCarrierDetails:carrierInfo[@"name"] 
-                                   mcc:carrierInfo[@"mcc"] 
-                                   mnc:carrierInfo[@"mnc"]];
-    
-    // Enable editing only for custom country codes
-    BOOL isCustomCountry = ![countryCode isEqualToString:@"us"] && 
-                           ![countryCode isEqualToString:@"in"] && 
-                           ![countryCode isEqualToString:@"ca"];
-    
-    self.carrierNameField.enabled = isCustomCountry;
-    self.mccField.enabled = isCustomCountry;
-    self.mncField.enabled = isCustomCountry;
+    self.selectedTrustedCarrierIDs = [selectedCarrierIDs copy];
+    [self updateTrustedCarrierSummary];
+
+    UIImpactFeedbackGenerator *feedbackGenerator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [feedbackGenerator prepare];
+    [feedbackGenerator impactOccurred];
 }
 
-// Add methods to handle carrier field changes
-- (void)carrierFieldChanged:(UITextField *)textField {
-    // Get current values from fields
-    NSString *carrierName = self.carrierNameField.text;
-    NSString *mcc = self.mccField.text;
-    NSString *mnc = self.mncField.text;
-    
-    // Save changes to profile-based storage
-    [NetworkManager saveCarrierDetails:carrierName mcc:mcc mnc:mnc];
-    
-    // Send notification that carrier details changed
-    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
-    CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.carrierDetailsChanged"), NULL, NULL, YES);
+- (void)updateTrustedCarrierSummary {
+    NSUInteger selectedCount = self.selectedTrustedCarrierIDs.count;
+    if (selectedCount == 0) {
+        self.trustedCarriersSummaryLabel.text = @"Choose carriers";
+        self.trustedCarriersButton.accessibilityValue = @"No trusted carriers selected";
+        return;
+    }
+
+    NSMutableOrderedSet<NSString *> *carrierNames = [NSMutableOrderedSet orderedSet];
+    for (PXTrustedCarrierOption *option in self.trustedCarrierOptions) {
+        if ([self.selectedTrustedCarrierIDs containsObject:option.stableIdentifier]) {
+            [carrierNames addObject:option.carrierName];
+        }
+    }
+
+    if (carrierNames.count == 0) {
+        self.trustedCarriersSummaryLabel.text = [NSString stringWithFormat:@"%lu selected", (unsigned long)selectedCount];
+    } else if (carrierNames.count == 1) {
+        self.trustedCarriersSummaryLabel.text = carrierNames.firstObject;
+    } else {
+        NSArray<NSString *> *names = carrierNames.array;
+        NSString *visibleNames = [[names subarrayWithRange:NSMakeRange(0, MIN((NSUInteger)2, names.count))] componentsJoinedByString:@", "];
+        NSUInteger hiddenCount = selectedCount > 2 ? selectedCount - 2 : 0;
+        self.trustedCarriersSummaryLabel.text = hiddenCount > 0
+            ? [NSString stringWithFormat:@"%@ + %lu more", visibleNames, (unsigned long)hiddenCount]
+            : visibleNames;
+    }
+
+    self.trustedCarriersButton.accessibilityValue = [NSString stringWithFormat:@"%@. %lu selected.", self.trustedCarriersSummaryLabel.text, (unsigned long)selectedCount];
 }
 
-// Add method to handle generate button tap
-- (void)generateCarrierButtonTapped:(UIButton *)sender {
-    // Get the current country code
-    NSString *countryCode = [self.securitySettings stringForKey:@"networkISOCountryCode"] ?: @"us";
-    
-    // Generate new carrier details
-    [self updateCarrierDetailsForCountry:countryCode];
-    
-    // Show feedback toast
-    [self showToastWithMessage:[NSString stringWithFormat:@"Generated carrier details for %@", [countryCode uppercaseString]]];
-    
-    // Add haptic feedback
-    UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-    [generator prepare];
-    [generator impactOccurred];
+- (void)updateNetworkCarrierPresentationForConnectionType:(NSInteger)connectionType
+                                  networkDataSpoofEnabled:(BOOL)networkDataSpoofEnabled {
+    BOOL showsCarrierControls = networkDataSpoofEnabled;
+    self.carrierSelectionContainer.hidden = !showsCarrierControls;
+    self.trustedCarriersButton.enabled = showsCarrierControls;
+
+    BOOL showsLocalIP = connectionType == 1;
+    self.localIPContainer.hidden = !showsLocalIP;
+    if (showsLocalIP) {
+        self.localIPv6Field.text = [NetworkManager getSavedLocalIPv6Address];
+        self.localIPField.text = [NetworkManager getSavedLocalIPAddress];
+    }
 }
 
-// Add method for quick generate button tap
-- (void)quickGenerateButtonTapped:(UIButton *)sender {
-    // Get the current country code
-    NSString *countryCode = [self.securitySettings stringForKey:@"networkISOCountryCode"] ?: @"us";
-    
-    // Generate new carrier details
-    [self updateCarrierDetailsForCountry:countryCode];
-    
-         // Add visual feedback - briefly highlight the button
-     UIColor *originalColor = sender.backgroundColor;
-     [UIView animateWithDuration:0.1 animations:^{
-         sender.backgroundColor = [UIColor systemBlueColor];
-         sender.tintColor = [UIColor whiteColor];
-     } completion:^(BOOL finished) {
-         [UIView animateWithDuration:0.2 animations:^{
-             sender.backgroundColor = originalColor;
-             sender.tintColor = [UIColor labelColor];
-         }];
-     }];
-    
-    // Show toast with generated carrier info
-    NSString *carrierInfo = [NSString stringWithFormat:@"Generated: %@ (%@-%@)", 
-                             self.carrierNameField.text,
-                             self.mccField.text,
-                             self.mncField.text];
-    [self showToastWithMessage:carrierInfo];
-    
-    // Add haptic feedback
-    UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-    [generator prepare];
-    [generator impactOccurred];
+- (void)updateGeneratedCarrierStatusWithNetworkIdentity:(NSDictionary<NSString *, id> *)networkIdentity {
+    NSString *countryName = [networkIdentity[@"country"] isKindOfClass:[NSString class]] ? networkIdentity[@"country"] : @"";
+    NSString *carrierName = [networkIdentity[@"carrierName"] isKindOfClass:[NSString class]] ? networkIdentity[@"carrierName"] : @"";
+    NSString *radioTechnology = [networkIdentity[@"radioTechnology"] isKindOfClass:[NSString class]] ? networkIdentity[@"radioTechnology"] : @"";
+
+    if (countryName.length == 0 || carrierName.length == 0) {
+        self.generatedCarrierStatusLabel.text = @"No generated carrier yet";
+        self.generatedCarrierStatusLabel.accessibilityLabel = @"Current carrier. No generated carrier yet.";
+        return;
+    }
+
+    NSString *radioDisplayName = [radioTechnology containsString:@"NR"] ? @"5G" : @"4G";
+    self.generatedCarrierStatusLabel.text = [NSString stringWithFormat:@"%@ · %@ · %@", countryName, carrierName, radioDisplayName];
+    self.generatedCarrierStatusLabel.accessibilityLabel = [NSString stringWithFormat:@"Current carrier. %@, %@, %@.", countryName, carrierName, radioDisplayName];
 }
 
 // Method to generate a random local IP address
@@ -4200,7 +3840,7 @@
     
     // 3. Then check plist file directly
     if (!toggleEnabled) {
-        NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+        NSString *securitySettingsPath = PXSecuritySettingsPath();
         NSDictionary *settingsDict = [NSDictionary dictionaryWithContentsOfFile:securitySettingsPath];
         if (settingsDict) {
             toggleEnabled = [settingsDict[@"canvasFingerprintingEnabled"] boolValue] || 
@@ -4323,7 +3963,7 @@
     BOOL enabled = sender.isOn;
     
     // ONLY update the plist file - THE SINGLE SOURCE OF TRUTH
-    NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+    NSString *securitySettingsPath = PXSecuritySettingsPath();
     NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
     settingsDict[@"canvasFingerprintingEnabled"] = @(enabled);
     settingsDict[@"CanvasFingerprint"] = @(enabled); // Also use old key for compatibility

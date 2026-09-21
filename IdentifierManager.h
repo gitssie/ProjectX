@@ -1,10 +1,14 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import "ProjectX.h"
+#import "AppIdentity.h"
 
 // Declare this in a category to avoid duplicate interface
 @interface IdentifierManager (ProfilePath)
 - (NSString *)profileIdentityPath;
+- (BOOL)regenerateAllEnabledIdentifiersWithError:(NSError **)error;
+- (BOOL)regenerateProfileAtIdentityDirectory:(NSString *)identityDirectory error:(NSError **)error;
+- (void)publishProfileGenerationNotifications;
 @end
 
 @interface IdentifierManager (AppManagement)
@@ -16,12 +20,23 @@
 - (void)setApplication:(NSString *)bundleID enabled:(BOOL)enabled;
 - (NSDictionary *)getApplicationInfo:(NSString *)bundleID;
 - (BOOL)isApplicationEnabled:(NSString *)bundleID;
+- (void)reloadApplicationScope;
 - (void)refreshScopedAppsInfoIfNeeded;
 - (void)addApplicationWithExtensionsToScope:(NSString *)bundleID;
 - (BOOL)isApplicationInScope:(NSString *)bundleID;
+- (BOOL)setApplicationInScope:(NSString *)bundleID
+                      enabled:(BOOL)enabled
+                        error:(NSError **)error;
 - (BOOL)isExtensionEnabled:(NSString *)bundleID;
+- (BOOL)shouldSpoofForBundle:(NSString *)bundleID;
 - (BOOL)isBundleIDMatch:(NSString *)targetBundleID withPattern:(NSString *)patternBundleID;
 - (void)saveScopedApps;
+- (PXAppIdentityRecord *)appIdentityForBundleIdentifier:(NSString *)bundleIdentifier;
+- (PXAppGroupIdentityRecord *)appGroupIdentityForGroupIdentifier:(NSString *)groupIdentifier;
+- (BOOL)ensureApplicationIdentityForBundleIdentifier:(NSString *)bundleIdentifier
+                                     groupIdentifiers:(NSSet<NSString *> *)groupIdentifiers
+                                installIdentifierKeys:(NSSet<NSString *> *)installIdentifierKeys
+                                                 error:(NSError **)error;
 
 #pragma mark - Custom Values
 

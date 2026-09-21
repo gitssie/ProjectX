@@ -3,12 +3,13 @@
 #import <objc/runtime.h>
 #import "ProjectXLogging.h"
 #import "PasteboardUUIDManager.h"
+#import "PXRootHidePath.h"
+#import "PXProcessHookPolicy.h"
+#import "IdentifierManager.h"
 #import <ellekit/ellekit.h>
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+#define kScopedAppsPath PXGlobalScopePreferencesPath()
 
 // Scoped apps cache
 static NSMutableDictionary *scopedAppsCache = nil;
@@ -16,23 +17,16 @@ static NSDate *scopedAppsCacheTimestamp = nil;
 static const NSTimeInterval kScopedAppsCacheValidDuration = 60.0; // 1 minute
 
 // Global variables to track state
-static NSMutableDictionary *cachedBundleDecisions = nil;
-static NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes 
 static NSMutableDictionary *customChangeCountMap = nil; // Store custom change counts per app
 static NSMutableDictionary *lastKnownPasteboardData = nil; // Cache pasteboard content hash
 
 // Forward declarations
 static NSString *getCurrentBundleID(void);
-static NSDictionary *loadScopedApps(void);
-static BOOL isInScopedAppsList(void);
+static NSDictionary *loadScopedApps(void) __attribute__((unused));
+static BOOL isInScopedAppsList(void) __attribute__((unused));
 
 // Callback function for notifications that clear the cache
 static void clearCacheCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    // Clear cached decisions
-    if (cachedBundleDecisions) {
-        [cachedBundleDecisions removeAllObjects];
-    }
-    
     // Also clear change count map
     if (customChangeCountMap) {
         [customChangeCountMap removeAllObjects];
@@ -76,7 +70,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
+        NSArray *possiblePaths = @[kScopedAppsPath];
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *validPath = nil;
         
@@ -128,25 +122,8 @@ static NSDictionary *loadScopedApps(void) {
 static BOOL isInScopedAppsList(void) {
     @try {
         NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        
-        // Check if this bundle ID is in the scoped apps dictionary
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        
-        // Check if the app is enabled
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-        
+        return bundleID.length > 0 &&
+            [[IdentifierManager sharedManager] shouldSpoofForBundle:bundleID];
     } @catch (NSException *e) {
         return NO;
     }
@@ -155,6 +132,9 @@ static BOOL isInScopedAppsList(void) {
 // Helper function to check if we should spoof for this bundle ID (with caching)
 static BOOL shouldSpoofForBundle(NSString *bundleID) {
     if (!bundleID) return NO;
+    return [[IdentifierManager sharedManager] shouldSpoofForBundle:bundleID];
+}
+#if 0
     
     // Skip system apps, the tweak itself, and system processes - more comprehensive filtering
     if ([bundleID hasPrefix:@"com.apple."] || 
@@ -204,7 +184,7 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
     cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
     
     return isScoped;
-}
+#endif
 
 // Add function to get spoofed Pasteboard UUID from manager
 static NSString *getSpoofedPasteboardUUID() {
@@ -226,12 +206,7 @@ static NSString *getSpoofedPasteboardUUID() {
     // First try to get the profile directory from environment or fallback
     NSString *identityDir = nil;
     
-    // Try to determine profile directory from common paths
-    NSArray *possibleProfilePaths = @[
-        @"/var/jb/var/mobile/Library/WeaponX/Profiles",
-        @"/var/jb/private/var/mobile/Library/WeaponX/Profiles", 
-        @"/var/mobile/Library/WeaponX/Profiles"
-    ];
+    NSArray *possibleProfilePaths = @[PXProfilesDirectoryPath()];
     
     NSFileManager *fileManager = [NSFileManager defaultManager];
     for (NSString *profileBasePath in possibleProfilePaths) {
@@ -363,6 +338,8 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
 }
 
 #pragma mark - UIPasteboard Hooks
+
+%group PXScopedPasteboardHooks
 
 %hook UIPasteboard
 
@@ -796,18 +773,21 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
 
 %end
 
+%end
+
 #pragma mark - Constructor
 
 %ctor {
     @autoreleasepool {
-        // Skip for system processes
+        if (!PXCurrentProcessMayInstallApplicationHooks()) {
+            return;
+        }
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!bundleID || [bundleID hasPrefix:@"com.apple."]) {
+        if (!bundleID) {
             return;
         }
         
         // Initialize caches
-        cachedBundleDecisions = [NSMutableDictionary dictionary];
         customChangeCountMap = [NSMutableDictionary dictionary];
         lastKnownPasteboardData = [NSMutableDictionary dictionary];
         
@@ -830,7 +810,8 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
             NULL,
             CFNotificationSuspensionBehaviorDeliverImmediately
         );
-        
+
+        %init(PXScopedPasteboardHooks);
         PXLog(@"[WeaponX] 📋 Initialized PasteboardHooks for %@", bundleID);
     }
 } 

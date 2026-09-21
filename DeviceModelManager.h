@@ -1,5 +1,4 @@
 #import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>
 
 @interface DeviceModelManager : NSObject
 
@@ -18,6 +17,10 @@
 - (NSString *)gpuFamilyForModel:(NSString *)deviceString;
 - (NSInteger)cpuCoreCountForModel:(NSString *)deviceString;
 - (NSString *)metalFeatureSetForModel:(NSString *)deviceString;
+- (BOOL)supports5GForModel:(NSString *)deviceString;
+- (NSArray<NSDictionary<NSString *, id> *> *)allDeviceSpecificationRecords;
+- (NSString *)physicalDeviceModelIdentifier;
+- (NSDictionary<NSString *, id> *)physicalDeviceSpecificationRecord;
 
 // Board ID and Hardware Model
 - (NSString *)boardIDForModel:(NSString *)deviceString;

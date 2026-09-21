@@ -2,6 +2,8 @@
 #import <ifaddrs.h>
 #import <arpa/inet.h>
 #import "ProjectXLogging.h"
+#import "NetworkIdentity.h"
+#import "PXRootHidePath.h"
 
 @implementation NetworkManager
 
@@ -17,98 +19,19 @@
 #pragma mark - Carrier Methods
 
 + (NSArray *)getCarriersForCountry:(NSString *)countryCode {
-    if ([countryCode.lowercaseString isEqualToString:@"us"]) {
-        return [self getUSCarriers];
-    } else if ([countryCode.lowercaseString isEqualToString:@"in"]) {
-        return [self getIndiaCarriers];
-    } else if ([countryCode.lowercaseString isEqualToString:@"ca"]) {
-        return [self getCanadaCarriers];
-    }
-    
-    // Return US carriers as default
-    return [self getUSCarriers];
-}
-
-+ (NSDictionary *)getRandomCarrierForCountry:(NSString *)countryCode {
-    NSArray *carriers = [self getCarriersForCountry:countryCode];
-    if (carriers.count == 0) {
-        return @{
-            @"name": @"Unknown Carrier",
-            @"mcc": @"000",
-            @"mnc": @"00"
-        };
-    }
-    
-    NSUInteger randomIndex = arc4random_uniform((uint32_t)carriers.count);
-    return carriers[randomIndex];
+    return PXCarriersForCountry(countryCode ?: @"");
 }
 
 + (NSArray *)getUSCarriers {
-    return @[
-        // Major Carriers
-        @{@"name": @"Verizon", @"mcc": @"310", @"mnc": @"004"},
-        @{@"name": @"Verizon", @"mcc": @"310", @"mnc": @"010"},
-        @{@"name": @"Verizon", @"mcc": @"311", @"mnc": @"480"},
-        
-        @{@"name": @"AT&T", @"mcc": @"310", @"mnc": @"170"},
-        @{@"name": @"AT&T", @"mcc": @"310", @"mnc": @"410"},
-        @{@"name": @"AT&T", @"mcc": @"310", @"mnc": @"150"},
-        @{@"name": @"AT&T", @"mcc": @"310", @"mnc": @"680"},
-        
-        @{@"name": @"T-Mobile", @"mcc": @"310", @"mnc": @"260"},
-        @{@"name": @"T-Mobile", @"mcc": @"310", @"mnc": @"160"},
-        @{@"name": @"T-Mobile", @"mcc": @"310", @"mnc": @"240"},
-        @{@"name": @"T-Mobile", @"mcc": @"310", @"mnc": @"800"},
-        
-        @{@"name": @"Sprint", @"mcc": @"310", @"mnc": @"120"},
-        @{@"name": @"Sprint", @"mcc": @"311", @"mnc": @"870"},
-        @{@"name": @"Sprint", @"mcc": @"312", @"mnc": @"530"},
-        
-        // Regional Carriers without spaces
-        @{@"name": @"Cellcom", @"mcc": @"311", @"mnc": @"210"}
-    ];
+    return PXCarriersForCountry(@"us");
 }
 
 + (NSArray *)getIndiaCarriers {
-    return @[
-        @{@"name": @"Jio", @"mcc": @"405", @"mnc": @"840"},
-        @{@"name": @"Jio", @"mcc": @"405", @"mnc": @"854"},
-        @{@"name": @"Jio", @"mcc": @"405", @"mnc": @"855"},
-        @{@"name": @"Jio", @"mcc": @"405", @"mnc": @"856"},
-        @{@"name": @"Jio", @"mcc": @"405", @"mnc": @"857"},
-        @{@"name": @"Airtel", @"mcc": @"404", @"mnc": @"45"},
-        @{@"name": @"Airtel", @"mcc": @"404", @"mnc": @"49"},
-        @{@"name": @"Airtel", @"mcc": @"404", @"mnc": @"70"},
-        @{@"name": @"Airtel", @"mcc": @"404", @"mnc": @"90"},
-        @{@"name": @"Airtel", @"mcc": @"404", @"mnc": @"92"},
-        @{@"name": @"BSNL", @"mcc": @"404", @"mnc": @"34"},
-        @{@"name": @"BSNL", @"mcc": @"404", @"mnc": @"38"},
-        @{@"name": @"BSNL", @"mcc": @"404", @"mnc": @"51"},
-        @{@"name": @"BSNL", @"mcc": @"404", @"mnc": @"53"},
-        @{@"name": @"MTNL", @"mcc": @"404", @"mnc": @"68"},
-        @{@"name": @"MTNL", @"mcc": @"404", @"mnc": @"69"}
-    ];
+    return PXCarriersForCountry(@"in");
 }
 
 + (NSArray *)getCanadaCarriers {
-    return @[
-        @{@"name": @"Rogers", @"mcc": @"302", @"mnc": @"720"},
-        @{@"name": @"Rogers", @"mcc": @"302", @"mnc": @"370"},
-        @{@"name": @"Bell", @"mcc": @"302", @"mnc": @"610"},
-        @{@"name": @"Bell", @"mcc": @"302", @"mnc": @"640"},
-        @{@"name": @"Bell", @"mcc": @"302", @"mnc": @"651"},
-        @{@"name": @"Telus", @"mcc": @"302", @"mnc": @"220"},
-        @{@"name": @"Telus", @"mcc": @"302", @"mnc": @"221"},
-        @{@"name": @"Freedom Mobile", @"mcc": @"302", @"mnc": @"490"},
-        @{@"name": @"Videotron", @"mcc": @"302", @"mnc": @"500"},
-        @{@"name": @"Videotron", @"mcc": @"302", @"mnc": @"510"},
-        @{@"name": @"SaskTel", @"mcc": @"302", @"mnc": @"780"},
-        @{@"name": @"Fido", @"mcc": @"302", @"mnc": @"370"},
-        @{@"name": @"Koodo", @"mcc": @"302", @"mnc": @"220"},
-        @{@"name": @"Chatr", @"mcc": @"302", @"mnc": @"720"},
-        @{@"name": @"Cityfone", @"mcc": @"302", @"mnc": @"720"},
-        @{@"name": @"7-Eleven Speak Out", @"mcc": @"302", @"mnc": @"720"}
-    ];
+    return PXCarriersForCountry(@"ca");
 }
 
 #pragma mark - IP Address Methods
@@ -205,13 +128,13 @@
 + (NSString *)profileIdentityPath {
     // Get current profile ID
     NSString *profileId = nil;
-    NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *centralInfoPath = PXCurrentProfileInfoPath();
     NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
     
     profileId = centralInfo[@"ProfileId"];
     if (!profileId) {
         // If not found, check the legacy active_profile_info.plist
-        NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+        NSString *activeInfoPath = PXActiveProfileInfoPath();
         NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
         profileId = activeInfo[@"ProfileId"];
         
@@ -222,7 +145,7 @@
         PXLog(@"[WeaponX] Warning: No active profile ID found for NetworkManager");
         // Fallback approach: try to find any profile directory
         NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *profilesDir = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesDir = PXProfilesDirectoryPath();
         NSError *error = nil;
         NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
         
@@ -249,8 +172,7 @@
     }
     
     // Build the path to this profile's identity directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
-    NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
+    NSString *identityDir = PXProfileIdentityDirectoryPath(profileId);
     
     // Create the directory if it doesn't exist
     NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -279,14 +201,14 @@
         PXLog(@"[WeaponX] Error: Could not get profile identity path for NetworkManager");
         return NO;
     }
-    // Generate spoofed IPv6
     NSString *ipv6 = [self generateSpoofedLocalIPv6AddressFromCurrent];
-    NSDictionary *networkDict = @{
+    NSString *networkPath = [identityDir stringByAppendingPathComponent:@"network_settings.plist"];
+    NSDictionary *existingSettings = [NSDictionary dictionaryWithContentsOfFile:networkPath] ?: @{};
+    NSDictionary *networkDict = PXNetworkSettingsByMerging(existingSettings, @{
         @"localIPAddress": ipAddress ?: @"",
         @"localIPv6Address": ipv6 ?: @"",
         @"lastUpdated": [NSDate date]
-    };
-    NSString *networkPath = [identityDir stringByAppendingPathComponent:@"network_settings.plist"];
+    });
     BOOL success = [networkDict writeToFile:networkPath atomically:YES];
     if (success) {
         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
@@ -335,12 +257,10 @@
         localIP = deviceIds[@"LocalIPAddress"];
     }
     
-    // If still not found, get current IP or generate a random one
+    // Missing generated data is a read-time fallback only; never create a mixed generation here.
     if (!localIP) {
         localIP = [self getCurrentLocalIPAddress];
-        // Save it for future use
-        [self saveLocalIPAddress:localIP];
-        PXLog(@"[WeaponX] No saved Local IP found, using current: %@", localIP);
+        PXLog(@"[WeaponX] No saved Local IP found; returning current address without persisting: %@", localIP);
     }
     
     return localIP;
@@ -358,63 +278,33 @@
         ipv6 = deviceIds[@"LocalIPv6Address"];
     }
     if (!ipv6) {
-        ipv6 = [self generateSpoofedLocalIPv6AddressFromCurrent];
-        [self saveLocalIPAddress:[self getCurrentLocalIPAddress]];
+        PXLog(@"[WeaponX] No saved IPv6 address found; leaving the generated Profile unchanged");
     }
     return ipv6;
 }
 
 #pragma mark - Profile-based Carrier Storage
 
-+ (BOOL)saveCarrierDetails:(NSString *)carrierName mcc:(NSString *)mcc mnc:(NSString *)mnc {
-    // Get path to current profile's identity directory
-    NSString *identityDir = [self profileIdentityPath];
-    if (!identityDir) {
-        PXLog(@"[WeaponX] Error: Could not get profile identity path for carrier details");
-        return NO;
++ (NSDictionary *)getSavedNetworkIdentity {
+    NSString *identityDirectory = [self profileIdentityPath];
+    if (!identityDirectory) {
+        return nil;
     }
-    
-    // Create carrier details dictionary
-    NSDictionary *carrierDict = @{
-        @"carrierName": carrierName ?: @"",
-        @"mcc": mcc ?: @"",
-        @"mnc": mnc ?: @"",
-        @"lastUpdated": [NSDate date]
-    };
-    
-    // Save to carrier_details.plist
-    NSString *carrierPath = [identityDir stringByAppendingPathComponent:@"carrier_details.plist"];
-    BOOL success = [carrierDict writeToFile:carrierPath atomically:YES];
-    
-    // Also update the network_settings.plist to keep all network data together
-    if (success) {
-        NSString *networkPath = [identityDir stringByAppendingPathComponent:@"network_settings.plist"];
-        NSMutableDictionary *networkDict = [NSMutableDictionary dictionaryWithContentsOfFile:networkPath] ?: [NSMutableDictionary dictionary];
-        
-        networkDict[@"carrierName"] = carrierName ?: @"";
-        networkDict[@"mcc"] = mcc ?: @"";
-        networkDict[@"mnc"] = mnc ?: @"";
-        [networkDict setObject:[NSDate date] forKey:@"lastUpdated"];
-        
-        success = [networkDict writeToFile:networkPath atomically:YES];
+    NSString *networkPath = [identityDirectory stringByAppendingPathComponent:@"network_settings.plist"];
+    NSDictionary *identity = [NSDictionary dictionaryWithContentsOfFile:networkPath];
+    return [identity isKindOfClass:[NSDictionary class]] ? identity : nil;
+}
+
++ (NSDictionary *)carrierDetailsFromIdentity:(NSDictionary *)identity {
+    NSString *carrierName = [identity[@"carrierName"] isKindOfClass:[NSString class]] ? identity[@"carrierName"] : nil;
+    NSString *mcc = [identity[@"mcc"] isKindOfClass:[NSString class]] ? identity[@"mcc"] : nil;
+    NSString *mnc = [identity[@"mnc"] isKindOfClass:[NSString class]] ? identity[@"mnc"] : nil;
+    if (carrierName.length == 0 || mcc.length == 0 || mnc.length == 0) {
+        return nil;
     }
-    
-    // Also update the combined device_ids.plist
-    if (success) {
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: [NSMutableDictionary dictionary];
-        
-        deviceIds[@"CarrierName"] = carrierName ?: @"";
-        deviceIds[@"CarrierMCC"] = mcc ?: @"";
-        deviceIds[@"CarrierMNC"] = mnc ?: @"";
-        
-        success = [deviceIds writeToFile:deviceIdsPath atomically:YES];
-    }
-    
-    PXLog(@"[WeaponX] %@ Carrier details saved to profile: %@ (%@-%@)", 
-           success ? @"✅" : @"❌", carrierName ?: @"Unknown", mcc ?: @"", mnc ?: @"");
-    
-    return success;
+    NSMutableDictionary *details = [identity mutableCopy];
+    details[@"name"] = carrierName;
+    return [details copy];
 }
 
 + (NSDictionary *)getSavedCarrierDetails {
@@ -422,81 +312,39 @@
 }
 
 + (NSDictionary *)getSavedCarrierDetailsWithForcedRefresh:(BOOL)forceRefresh {
-    // Get path to current profile's identity directory
-    NSString *identityDir = [self profileIdentityPath];
-    if (!identityDir) {
-        PXLog(@"[WeaponX] Error: Could not get profile identity path for carrier details");
+    if (forceRefresh) {
+        PXLog(@"[WeaponX] Carrier reads no longer regenerate independently; use Generate All for a new Profile generation");
+    }
+
+    NSDictionary *networkIdentity = [self getSavedNetworkIdentity];
+    NSDictionary *details = [self carrierDetailsFromIdentity:networkIdentity];
+    if (details) {
+        return details;
+    }
+
+    NSString *identityDirectory = [self profileIdentityPath];
+    if (!identityDirectory) {
         return nil;
     }
-    
-    // If forced refresh is requested, always generate new carrier details
-    if (forceRefresh) {
-        NSString *countryCode = [self getCurrentCountryCode] ?: @"us";
-        NSDictionary *carrierInfo = [self getRandomCarrierForCountry:countryCode];
-        
-        // Save the generated carrier info
-        [self saveCarrierDetails:carrierInfo[@"name"] mcc:carrierInfo[@"mcc"] mnc:carrierInfo[@"mnc"]];
-        
-        PXLog(@"[WeaponX] Forced refresh of carrier details: %@ (%@-%@)", 
-              carrierInfo[@"name"], carrierInfo[@"mcc"], carrierInfo[@"mnc"]);
-        
-        return carrierInfo;
+    NSString *carrierPath = [identityDirectory stringByAppendingPathComponent:@"carrier_details.plist"];
+    NSDictionary *carrierDictionary = [NSDictionary dictionaryWithContentsOfFile:carrierPath];
+    details = [self carrierDetailsFromIdentity:carrierDictionary];
+    if (details) {
+        return details;
     }
-    
-    // Try to read from carrier_details.plist first
-    NSString *carrierPath = [identityDir stringByAppendingPathComponent:@"carrier_details.plist"];
-    NSDictionary *carrierDict = [NSDictionary dictionaryWithContentsOfFile:carrierPath];
-    
-    if (carrierDict && carrierDict[@"carrierName"] && carrierDict[@"mcc"] && carrierDict[@"mnc"]) {
-        return @{
-            @"name": carrierDict[@"carrierName"],
-            @"mcc": carrierDict[@"mcc"],
-            @"mnc": carrierDict[@"mnc"]
-        };
-    }
-    
-    // If not found, try reading from network_settings.plist
-    NSString *networkPath = [identityDir stringByAppendingPathComponent:@"network_settings.plist"];
-    NSDictionary *networkDict = [NSDictionary dictionaryWithContentsOfFile:networkPath];
-    
-    if (networkDict && networkDict[@"carrierName"] && networkDict[@"mcc"] && networkDict[@"mnc"]) {
-        return @{
-            @"name": networkDict[@"carrierName"],
-            @"mcc": networkDict[@"mcc"],
-            @"mnc": networkDict[@"mnc"]
-        };
-    }
-    
-    // If not found, try the combined device_ids.plist
-    NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+
+    NSString *deviceIdsPath = [identityDirectory stringByAppendingPathComponent:@"device_ids.plist"];
     NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-    
-    if (deviceIds && deviceIds[@"CarrierName"] && deviceIds[@"CarrierMCC"] && deviceIds[@"CarrierMNC"]) {
-        return @{
-            @"name": deviceIds[@"CarrierName"],
-            @"mcc": deviceIds[@"CarrierMCC"],
-            @"mnc": deviceIds[@"CarrierMNC"]
-        };
-    }
-    
-    // If still not found, generate default values based on country code (US as fallback)
-    NSString *countryCode = [self getCurrentCountryCode] ?: @"us";
-    NSDictionary *carrierInfo = [self getRandomCarrierForCountry:countryCode];
-    
-    // Save the generated carrier info for future use
-    [self saveCarrierDetails:carrierInfo[@"name"] mcc:carrierInfo[@"mcc"] mnc:carrierInfo[@"mnc"]];
-    
-    PXLog(@"[WeaponX] No saved carrier details found, generated: %@ (%@-%@)", 
-          carrierInfo[@"name"], carrierInfo[@"mcc"], carrierInfo[@"mnc"]);
-    
-    return carrierInfo;
+    return [self carrierDetailsFromIdentity:@{
+        @"carrierName": deviceIds[@"CarrierName"] ?: @"",
+        @"mcc": deviceIds[@"CarrierMCC"] ?: @"",
+        @"mnc": deviceIds[@"CarrierMNC"] ?: @"",
+        @"isoCountryCode": deviceIds[@"CarrierISOCountryCode"] ?: @""
+    }];
 }
 
-// Helper method to get current country code (can be extended in the future)
 + (NSString *)getCurrentCountryCode {
-    // For now, we'll return nil which will default to "us" in the caller
-    // In the future, this could be enhanced to detect the actual country
-    return nil;
+    return [self getSavedNetworkIdentity][@"isoCountryCode"];
 }
 
 @end

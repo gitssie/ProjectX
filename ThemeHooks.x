@@ -1,13 +1,14 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import "ProjectXLogging.h"
+#import "PXRootHidePath.h"
+#import "PXProcessHookPolicy.h"
+#import "IdentifierManager.h"
 #import <objc/runtime.h>
 #import <ellekit/ellekit.h>
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+#define kScopedAppsPath PXGlobalScopePreferencesPath()
 
 // Scoped apps cache
 static NSMutableDictionary *scopedAppsCache = nil;
@@ -22,7 +23,7 @@ static NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes in seconds
 
 // Forward declarations
 static NSString *getCurrentBundleID(void);
-static NSDictionary *loadScopedApps(void);
+static NSDictionary *loadScopedApps(void) __attribute__((unused));
 static BOOL isInScopedAppsList(void);
 
 // Define the possible theme values
@@ -64,7 +65,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
+        NSArray *possiblePaths = @[kScopedAppsPath];
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *validPath = nil;
         
@@ -116,25 +117,8 @@ static NSDictionary *loadScopedApps(void) {
 static BOOL isInScopedAppsList(void) {
     @try {
         NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        
-        // Check if this bundle ID is in the scoped apps dictionary
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        
-        // Check if the app is enabled
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-        
+        return bundleID.length > 0 &&
+            [[IdentifierManager sharedManager] shouldSpoofForBundle:bundleID];
     } @catch (NSException *e) {
         return NO;
     }
@@ -155,15 +139,6 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
             [[NSDate date] timeIntervalSinceDate:decisionTimestamp] < kCacheValidityDuration) {
             return [cachedDecision boolValue];
         }
-    }
-    
-    // Skip spoofing for system apps
-    if ([bundleID hasPrefix:@"com.apple."] && 
-        ![bundleID isEqualToString:@"com.apple.mobilesafari"] &&
-        ![bundleID isEqualToString:@"com.apple.webapp"]) {
-        cachedBundleDecisions[bundleID] = @NO;
-        cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-        return NO;
     }
     
     // Check if the current app is a scoped app
@@ -196,12 +171,7 @@ static WeaponXThemeStyle getThemeStyleFromProfile(void) {
     // Read theme value directly from profile files
     NSString *themeValue = nil;
     
-    // Try to get the current profile directory
-    NSArray *possibleProfilePaths = @[
-        @"/var/jb/var/mobile/Library/WeaponX/Profiles",
-        @"/var/jb/private/var/mobile/Library/WeaponX/Profiles", 
-        @"/var/mobile/Library/WeaponX/Profiles"
-    ];
+    NSArray *possibleProfilePaths = @[PXProfilesDirectoryPath()];
     
     NSFileManager *fileManager = [NSFileManager defaultManager];
     for (NSString *profileBasePath in possibleProfilePaths) {
@@ -451,6 +421,9 @@ static void themeSettingsChanged(CFNotificationCenterRef center, void *observer,
 // Constructor to initialize hooks
 %ctor {
     @autoreleasepool {
+        if (!PXCurrentProcessMayInstallApplicationHooks()) {
+            return;
+        }
         @try {
             PXLog(@"[ThemeHooks] Initializing theme hooks");
             
@@ -458,14 +431,6 @@ static void themeSettingsChanged(CFNotificationCenterRef center, void *observer,
             
             // Skip if we can't get bundle ID
             if (!bundleID || [bundleID length] == 0) {
-                return;
-            }
-            
-            // Don't hook system processes and our own apps
-            if ([bundleID hasPrefix:@"com.apple."] || 
-                [bundleID isEqualToString:@"com.hydra.projectx"] || 
-                [bundleID isEqualToString:@"com.hydra.weaponx"]) {
-                PXLog(@"[ThemeHooks] Not hooking system process: %@", bundleID);
                 return;
             }
             

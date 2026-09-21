@@ -6,6 +6,8 @@
 #import "SerialNumberManager.h"
 #import "IOSVersionInfo.h"
 #import "ProjectXLogging.h"
+#import "PXRootHidePath.h"
+#import "PXScopedAppStore.h"
 #import "WiFiManager.h"
 #import "StorageManager.h"
 #import "BatteryManager.h"
@@ -14,11 +16,16 @@
 #import "PasteboardUUIDManager.h"
 #import "KeychainUUIDManager.h"
 #import "UserDefaultsUUIDManager.h"
-#import "AppGroupUUIDManager.h"
 #import "UptimeManager.h"
 #import "CoreDataUUIDManager.h"
-#import "AppInstallUUIDManager.h"
-#import "AppContainerUUIDManager.h"
+#import "NetworkIdentity.h"
+#import "AppIdentity.h"
+#import "ProfileManifest.h"
+#import "RegionIdentity.h"
+#import "TrustedCarrierPolicy.h"
+#import "LocationSpoofingManager.h"
+#import "PXEnvironmentModelSelection.h"
+#import "PXEnvironmentPolicy.h"
 #import <Security/Security.h>
 
 @interface LSApplicationWorkspace
@@ -45,7 +52,58 @@
 @property (nonatomic, strong) NSMutableDictionary *scopedApps;
 @property (nonatomic, strong) NSError *error;
 @property (nonatomic, strong) NSMutableDictionary *spoofCache;
+- (NSDictionary<NSString *, NSDictionary<NSString *, id> *> *)scopedAppsSnapshot;
+- (void)publishScopedAppsSnapshot:
+    (NSDictionary<NSString *, NSDictionary<NSString *, id> *> *)scopedApps;
+- (BOOL)writeScopedApps:(NSDictionary<NSString *, NSDictionary<NSString *, id> *> *)scopedApps
+                  error:(NSError **)error;
+- (BOOL)persistAndPublishScopedAppsSnapshot:
+            (NSDictionary<NSString *, NSDictionary<NSString *, id> *> *)scopedApps
+                                      error:(NSError **)error;
 @end
+
+static NSMutableDictionary *_appEnabledCache = nil;
+static NSTimeInterval _cacheExpirationTime = 30.0;
+
+static NSArray<NSString *> *PXScopeKeysMatchingBundleIdentifier(
+    NSDictionary<NSString *, id> *scopedApps,
+    NSString *bundleIdentifier
+) {
+    if (bundleIdentifier.length == 0) {
+        return @[];
+    }
+    NSString *normalizedBundleIdentifier = bundleIdentifier.lowercaseString;
+    NSMutableArray<NSString *> *matchingKeys = [NSMutableArray array];
+    for (id key in scopedApps) {
+        if ([key isKindOfClass:[NSString class]] &&
+            [[(NSString *)key lowercaseString] isEqualToString:normalizedBundleIdentifier]) {
+            [matchingKeys addObject:key];
+        }
+    }
+    return [matchingKeys copy];
+}
+
+static NSDictionary<NSString *, id> *PXScopeRecordForBundleIdentifier(
+    NSDictionary<NSString *, NSDictionary<NSString *, id> *> *scopedApps,
+    NSString *bundleIdentifier
+) {
+    NSString *matchingKey = PXScopeKeysMatchingBundleIdentifier(scopedApps,
+                                                                 bundleIdentifier).firstObject;
+    return matchingKey ? scopedApps[matchingKey] : nil;
+}
+
+static void PXIdentifierManagerScopedAppsChanged(CFNotificationCenterRef center,
+                                                 void *observer,
+                                                 CFStringRef name,
+                                                 const void *object,
+                                                 CFDictionaryRef userInfo) {
+    (void)center;
+    (void)name;
+    (void)object;
+    (void)userInfo;
+    IdentifierManager *manager = (__bridge IdentifierManager *)observer;
+    [manager reloadApplicationScope];
+}
 
 @implementation IdentifierManager
 
@@ -218,6 +276,12 @@
     dispatch_once(&onceToken, ^{
         sharedManager = [[self alloc] init];
         [sharedManager loadSettings];
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                        (__bridge const void *)sharedManager,
+                                        PXIdentifierManagerScopedAppsChanged,
+                                        CFSTR("com.hydra.projectx.scopedAppsChanged"),
+                                        NULL,
+                                        CFNotificationSuspensionBehaviorDeliverImmediately);
     });
     return sharedManager;
 }
@@ -231,17 +295,48 @@
     return self;
 }
 
+- (NSDictionary<NSString *, NSDictionary<NSString *, id> *> *)scopedAppsSnapshot {
+    @synchronized(self) {
+        return [self.scopedApps copy] ?: @{};
+    }
+}
+
+- (void)publishScopedAppsSnapshot:
+    (NSDictionary<NSString *, NSDictionary<NSString *, id> *> *)scopedApps {
+    NSDictionary<NSString *, NSDictionary<NSString *, id> *> *eligibleScopedApps =
+        PXEligibleScopedApplications(scopedApps ?: @{});
+    @synchronized(self) {
+        self.scopedApps = [eligibleScopedApps mutableCopy];
+        [_appEnabledCache removeAllObjects];
+        [self.spoofCache removeAllObjects];
+    }
+}
+
+- (BOOL)persistAndPublishScopedAppsSnapshot:
+            (NSDictionary<NSString *, NSDictionary<NSString *, id> *> *)scopedApps
+                                      error:(NSError **)error {
+    @synchronized(self) {
+    NSDictionary<NSString *, NSDictionary<NSString *, id> *> *eligibleScopedApps =
+        PXEligibleScopedApplications(scopedApps ?: @{});
+    if (![self writeScopedApps:eligibleScopedApps error:error]) {
+        return NO;
+    }
+    [self publishScopedAppsSnapshot:eligibleScopedApps];
+    return YES;
+    }
+}
+
 #pragma mark - Profile Integration
 
 - (NSString *)getActiveProfileId {
     // First check the primary profile info file
-    NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *centralInfoPath = PXCurrentProfileInfoPath();
     NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
     
     NSString *profileId = centralInfo[@"ProfileId"];
     if (!profileId) {
         // If not found, check the legacy active_profile_info.plist
-        NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+        NSString *activeInfoPath = PXActiveProfileInfoPath();
         NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
         profileId = activeInfo[@"ProfileId"];
         
@@ -252,7 +347,7 @@
         NSLog(@"[WeaponX] Warning: No active profile ID found, using default");
         // Try to find any profile directory as a fallback
         NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *profilesDir = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesDir = PXProfilesDirectoryPath();
         NSError *error = nil;
         NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
         
@@ -290,7 +385,7 @@
     }
     
     // Build the path to this profile's identity directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = PXProfileDirectoryPath(profileId);
     NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
     
     // Create the directory if it doesn't exist
@@ -455,29 +550,17 @@
 }
 
 - (NSString *)generateSystemBootUUID {
-    NSString *bootUUID = [[SystemUUIDManager sharedManager] generateBootUUID];
-    if (!bootUUID) {
-        self.error = [[SystemUUIDManager sharedManager] lastError];
+    NSString *identityDir = [self profileIdentityPath];
+    NSDictionary *projection = [NSDictionary dictionaryWithContentsOfFile:
+        [identityDir stringByAppendingPathComponent:@"system_boot_uuid.plist"]];
+    NSString *bootUUID = projection[@"value"];
+    if (![[NSUUID alloc] initWithUUIDString:bootUUID]) {
+        self.error = [NSError errorWithDomain:@"com.hydra.projectx.profile-manifest"
+                                         code:102
+                                     userInfo:@{NSLocalizedDescriptionKey: @"The active Profile has no valid virtual Boot UUID"}];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": bootUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"system_boot_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"SystemBootUUID"] = bootUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 🆔 Generated System Boot UUID: %@", bootUUID);
-    }
-    
+    [[SystemUUIDManager sharedManager] setCurrentBootUUID:bootUUID];
     return bootUUID;
 }
 
@@ -590,30 +673,10 @@
 }
 
 - (NSString *)generateAppGroupUUID {
-    NSString *appGroupUUID = [[AppGroupUUIDManager sharedManager] generateAppGroupUUID];
-    if (!appGroupUUID) {
-        self.error = [[AppGroupUUIDManager sharedManager] lastError];
-        return nil;
-    }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": appGroupUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"appgroup_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"AppGroupUUID"] = appGroupUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 👥 Generated App Group UUID: %@", appGroupUUID);
-    }
-    
-    return appGroupUUID;
+    self.error = [NSError errorWithDomain:@"com.hydra.projectx.app-identity"
+                                     code:2
+                                 userInfo:@{NSLocalizedDescriptionKey: @"App Group identities are managed per entitlement group"}];
+    return nil;
 }
 
 - (NSString *)generateCoreDataUUID {
@@ -710,198 +773,215 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
 }
 
 - (NSString *)generateAppInstallUUID {
-    NSString *appInstallUUID = [[AppInstallUUIDManager sharedManager] generateAppInstallUUID];
-    if (!appInstallUUID) {
-        self.error = [[AppInstallUUIDManager sharedManager] lastError];
-        return nil;
-    }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": appInstallUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"appinstall_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"AppInstallUUID"] = appInstallUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 📱 Generated App Install UUID: %@", appInstallUUID);
-    }
-    
-    return appInstallUUID;
+    self.error = [NSError errorWithDomain:@"com.hydra.projectx.app-identity"
+                                     code:2
+                                 userInfo:@{NSLocalizedDescriptionKey: @"App Install identities are managed per Scoped App"}];
+    return nil;
 }
 
 - (NSString *)generateAppContainerUUID {
-    NSString *appContainerUUID = [[AppContainerUUIDManager sharedManager] generateAppContainerUUID];
-    if (!appContainerUUID) {
-        self.error = [[AppContainerUUIDManager sharedManager] lastError];
-        return nil;
-    }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": appContainerUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"appcontainer_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"AppContainerUUID"] = appContainerUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 📦 Generated App Container UUID: %@", appContainerUUID);
-    }
-    
-    return appContainerUUID;
+    self.error = [NSError errorWithDomain:@"com.hydra.projectx.app-identity"
+                                     code:2
+                                 userInfo:@{NSLocalizedDescriptionKey: @"App Container identities are managed per bundle"}];
+    return nil;
 }
 
 - (void)regenerateAllEnabledIdentifiers {
-        // For WiFi info: Use the WiFiManager to generate
-    Class wifiManagerClass = NSClassFromString(@"WiFiManager");
-    if (wifiManagerClass && [wifiManagerClass respondsToSelector:@selector(sharedManager)]) {
-        id wifiManager = [wifiManagerClass sharedManager];
-        if (wifiManager && [wifiManager respondsToSelector:@selector(generateWiFiInfo)]) {
-            // Generate WiFi info
-            [wifiManager generateWiFiInfo];
-            PXLog(@"[WeaponX] 📶 Generated WiFi information for current profile");
+    NSError *generationError = nil;
+    if (![self regenerateAllEnabledIdentifiersWithError:&generationError]) {
+        self.error = generationError;
+        PXLog(@"[WeaponX] Profile generation failed: %@", generationError.localizedDescription);
+    }
+}
+
+- (BOOL)regenerateAllEnabledIdentifiersWithError:(NSError **)error {
+    NSString *identityDirectory = [self profileIdentityPath];
+    if (!identityDirectory) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"com.hydra.projectx.profile-manifest"
+                                         code:100
+                                     userInfo:@{NSLocalizedDescriptionKey: @"No active Profile identity directory"}];
         }
-    }
-    
-    // Continue with other identifiers
-    if ([self isIdentifierEnabled:@"IDFA"]) {
-        [self generateIDFA];
-    }
-    if ([self isIdentifierEnabled:@"IDFV"]) {
-        [self generateIDFV];
-    }
-    if ([self isIdentifierEnabled:@"DeviceName"]) {
-        [self generateDeviceName];
-    }
-    if ([self isIdentifierEnabled:@"SerialNumber"]) {
-        [self generateSerialNumber];
-    }
-    if ([self isIdentifierEnabled:@"IMEI"]) {
-        NSString *imei = [self generateIMEI];
-        if (imei) [self setCustomIMEI:imei];
-    }
-    if ([self isIdentifierEnabled:@"MEID"]) {
-        NSString *meid = [self generateMEID];
-        if (meid) [self setCustomMEID:meid];
-    }
-    
-    // Always generate device model regardless of whether it exists or not
-    NSString *deviceModel = [self generateDeviceModel];
-    if (deviceModel) [self setCustomDeviceModel:deviceModel];
-    
-    // Always generate device theme if it doesn't exist
-    if (![self currentValueForIdentifier:@"DeviceTheme"]) {
-        NSString *deviceTheme = [self generateDeviceTheme];
-        if (deviceTheme) {
-            [self setCustomDeviceTheme:deviceTheme];
-            PXLog(@"[WeaponX] 🎨 Generated device theme: %@", deviceTheme);
-        }
-    }
-    
-    if ([self isIdentifierEnabled:@"IOSVersion"]) {
-        [self generateIOSVersion];
-    }
-    if ([self isIdentifierEnabled:@"SystemBootUUID"]) {
-        [self generateSystemBootUUID];
-    }
-    if ([self isIdentifierEnabled:@"DyldCacheUUID"]) {
-        [self generateDyldCacheUUID];
-    }
-    if ([self isIdentifierEnabled:@"PasteboardUUID"]) {
-        [self generatePasteboardUUID];
+        return NO;
     }
 
-    if ([self isIdentifierEnabled:@"KeychainUUID"]) {
-        [self generateKeychainUUID];
+    return [self regenerateProfileAtIdentityDirectory:identityDirectory error:error];
+}
+
+- (BOOL)regenerateProfileAtIdentityDirectory:(NSString *)identityDirectory error:(NSError **)error {
+    return [self regenerateProfileAtIdentityDirectory:identityDirectory publishNotifications:YES error:error];
+}
+
+- (BOOL)regenerateProfileAtIdentityDirectory:(NSString *)identityDirectory
+                         publishNotifications:(BOOL)publishNotifications
+                                        error:(NSError **)error {
+
+    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
+    NSError *migrationError = nil;
+    if (![store migrateLegacyProfileIfNeededWithError:&migrationError]) {
+        if (error) *error = migrationError;
+        return NO;
     }
-    if ([self isIdentifierEnabled:@"UserDefaultsUUID"]) {
-        [self generateUserDefaultsUUID];
+    PXProfileManifest *previousManifest = [store activeManifestWithError:nil];
+
+    NSString *profileDirectory = [identityDirectory stringByDeletingLastPathComponent];
+    PXTrustedCarrierPolicyStore *carrierPolicyStore = [[PXTrustedCarrierPolicyStore alloc]
+        initWithProfileDirectory:profileDirectory];
+    NSError *carrierPolicyError = nil;
+    NSSet<NSString *> *trustedCarrierIDs = [carrierPolicyStore trustedCarrierIDsWithError:&carrierPolicyError];
+    if (!trustedCarrierIDs) {
+        if (error) *error = carrierPolicyError;
+        return NO;
     }
-    if ([self isIdentifierEnabled:@"AppGroupUUID"]) {
-        [self generateAppGroupUUID];
+
+    uint8_t seedBytes[32];
+    if (SecRandomCopyBytes(kSecRandomDefault, sizeof(seedBytes), seedBytes) != errSecSuccess) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"com.hydra.projectx.profile-manifest"
+                                         code:101
+                                     userInfo:@{NSLocalizedDescriptionKey: @"Secure Profile seed generation failed"}];
+        }
+        return NO;
     }
-    if ([self isIdentifierEnabled:@"CoreDataUUID"]) {
-        [self generateCoreDataUUID];
+
+    DeviceModelManager *deviceManager = [DeviceModelManager sharedManager];
+    PXEnvironmentPolicyStore *environmentPolicy = [PXEnvironmentPolicyStore sharedStore];
+    NSError *environmentPolicyError = nil;
+    NSDictionary<NSString *, id> *graphicsHostCapabilities = PXCurrentGraphicsHostCapabilities();
+    NSDictionary<NSString *, id> *physicalModelRecord =
+        [deviceManager physicalDeviceSpecificationRecord];
+    NSDictionary<NSString *, id> *selectedModelRecord = PXResolveEnvironmentModelSelection(
+        environmentPolicy,
+        [deviceManager allDeviceSpecificationRecords],
+        physicalModelRecord,
+        graphicsHostCapabilities,
+        nil,
+        &environmentPolicyError);
+    if (!selectedModelRecord || environmentPolicyError) {
+        if (error) *error = environmentPolicyError;
+        return NO;
     }
-    if ([self isIdentifierEnabled:@"SystemUptime"]) {
-        NSString *profilePath = [self profileIdentityPath];
-[[UptimeManager sharedManager] generateUptimeForProfile:profilePath];
+    PXEnvironmentModelSelectionMode modelSelectionMode = [environmentPolicy
+        selectedModelSelectionModeWithError:&environmentPolicyError];
+    if (environmentPolicyError) {
+        if (error) *error = environmentPolicyError;
+        return NO;
     }
-    if ([self isIdentifierEnabled:@"BootTime"]) {
-        NSString *profilePath = [self profileIdentityPath];
-[[UptimeManager sharedManager] generateBootTimeForProfile:profilePath];
+    NSMutableArray<NSDictionary<NSString *, id> *> *iOSCatalog = [NSMutableArray array];
+    for (NSDictionary<NSString *, id> *tuple in [[IOSVersionInfo sharedManager] availableIOSVersions]) {
+        NSMutableDictionary<NSString *, id> *enrichedTuple = [tuple mutableCopy];
+        enrichedTuple[@"majorVersion"] = @([[tuple[@"version"] componentsSeparatedByString:@"."].firstObject integerValue]);
+        [iOSCatalog addObject:[enrichedTuple copy]];
     }
-    // Even though we already generated WiFi info above, check if it's specifically enabled
-    if ([self isIdentifierEnabled:@"WiFi"]) {
-        // Use WiFiManager to generate new WiFi info
-        id wifiManager = NSClassFromString(@"WiFiManager");
-        if (wifiManager && [wifiManager respondsToSelector:@selector(sharedManager)]) {
-            id sharedManager = [wifiManager sharedManager];
-            if (sharedManager && [sharedManager respondsToSelector:@selector(generateWiFiInfo)]) {
-                [sharedManager generateWiFiInfo];
-                PXLog(@"Generated new WiFi information");
-            }
+
+    NSDictionary *configuredLocation = [environmentPolicy configuredLocationWithError:&environmentPolicyError];
+    BOOL locationWasCleared = [environmentPolicy locationWasExplicitlyClearedWithError:&environmentPolicyError];
+    if (environmentPolicyError) {
+        if (error) *error = environmentPolicyError;
+        return NO;
+    }
+    NSDictionary *pinnedLocation = configuredLocation;
+    if (!pinnedLocation && !locationWasCleared) {
+        pinnedLocation = [[LocationSpoofingManager sharedManager] loadSpoofingLocation];
+        if (pinnedLocation.count == 0 && [previousManifest.location[@"pinned"] boolValue]) {
+            pinnedLocation = previousManifest.location;
         }
     }
-    if ([self isIdentifierEnabled:@"StorageSystem"]) {
-        // Use StorageManager to generate new storage info
-        id storageManager = NSClassFromString(@"StorageManager");
-        if (storageManager && [storageManager respondsToSelector:@selector(sharedManager)]) {
-            id sharedManager = [storageManager sharedManager];
-            if (sharedManager && [sharedManager respondsToSelector:@selector(generateStorageForCapacity:)]) {
-                // Randomly choose between 64GB and 128GB
-                NSString *capacity = [sharedManager respondsToSelector:@selector(randomizeStorageCapacity)] ? 
-                                       [sharedManager randomizeStorageCapacity] : @"64";
-                
-                NSDictionary *storageInfo = [sharedManager generateStorageForCapacity:capacity];
-                if (storageInfo) {
-                    [sharedManager setTotalStorageCapacity:storageInfo[@"TotalStorage"]];
-                    [sharedManager setFreeStorageSpace:storageInfo[@"FreeStorage"]];
-                    [sharedManager setFilesystemType:storageInfo[@"FilesystemType"]];
-                    PXLog(@"[WeaponX] 💾 Generated new storage information: %@ GB", storageInfo[@"TotalStorage"]);
-                }
-            }
+
+    PXProfileGenerationInput *input = [[PXProfileGenerationInput alloc] init];
+    input.seed = [NSData dataWithBytes:seedBytes length:sizeof(seedBytes)];
+    input.generatedAt = [NSDate date];
+    input.modelCatalog = @[selectedModelRecord];
+    input.physicalModelRecord = physicalModelRecord ?: @{};
+    input.usesPhysicalDeviceModel =
+        modelSelectionMode == PXEnvironmentModelSelectionModePhysicalDevice;
+    input.iOSCatalog = [iOSCatalog copy];
+    input.carrierCatalog = PXCarrierCatalog();
+    input.trustedCarrierIDs = trustedCarrierIDs;
+    input.pinnedLocation = pinnedLocation ?: @{};
+    NSString *selectedCarrierID = [trustedCarrierIDs.allObjects
+        sortedArrayUsingSelector:@selector(compare:)].firstObject;
+    NSDictionary<NSString *, id> *selectedCarrier = nil;
+    for (NSDictionary<NSString *, id> *carrier in PXCarrierCatalog()) {
+        if ([carrier[@"carrierID"] isEqualToString:selectedCarrierID]) {
+            selectedCarrier = carrier;
+            break;
         }
     }
-    if ([self isIdentifierEnabled:@"Battery"]) {
-        // Use BatteryManager to generate new battery info
-        id batteryManager = NSClassFromString(@"BatteryManager");
-        if (batteryManager && [batteryManager respondsToSelector:@selector(sharedManager)]) {
-            id sharedManager = [batteryManager sharedManager];
-            if (sharedManager && [sharedManager respondsToSelector:@selector(generateBatteryInfo)]) {
-                NSDictionary *batteryInfo = [sharedManager generateBatteryInfo];
-                if (batteryInfo) {
-                    PXLog(@"[WeaponX] 🔋 Generated new battery information: %@%%", 
-                         @([batteryInfo[@"BatteryLevel"] floatValue] * 100));
-                }
-            }
+    PXRegionIdentity *pendingRegion = selectedCarrier
+        ? PXRegionIdentityForCountryCode(selectedCarrier[@"isoCountryCode"],
+            [selectedCarrierID dataUsingEncoding:NSUTF8StringEncoding])
+        : nil;
+    input.region = pendingRegion ? [pendingRegion propertyListRepresentation] : @{};
+    NSDictionary<NSString *, NSDictionary<NSString *, id> *> *scopeSnapshot =
+        [self scopedAppsSnapshot];
+    NSSet<NSString *> *appBundleIdentifiers =
+        PXEnabledEligibleAppBundleIdentifiers(scopeSnapshot);
+    NSMutableDictionary<NSString *, NSSet<NSString *> *> *installIdentifierKeys = [NSMutableDictionary dictionary];
+    [previousManifest.appIdentities enumerateKeysAndObjectsUsingBlock:^(NSString *bundleIdentifier,
+                                                                        PXAppIdentityRecord *identity,
+                                                                        BOOL *stop) {
+        (void)stop;
+        installIdentifierKeys[bundleIdentifier] = identity.installIdentifierKeys;
+    }];
+    for (NSString *bundleIdentifier in appBundleIdentifiers) {
+        NSDictionary *appInfo = scopeSnapshot[bundleIdentifier];
+        NSArray *configuredKeys = [appInfo[@"installIdentifierKeys"] isKindOfClass:[NSArray class]]
+            ? appInfo[@"installIdentifierKeys"]
+            : @[];
+        if (configuredKeys.count > 0) {
+            installIdentifierKeys[bundleIdentifier] = [NSSet setWithArray:configuredKeys];
         }
     }
-    // Add AppInstallUUID
-    if ([self isIdentifierEnabled:@"AppInstallUUID"]) {
-        [self generateAppInstallUUID];
+    input.appBundleIdentifiers = appBundleIdentifiers;
+    input.appGroupIdentifiers = [NSSet setWithArray:previousManifest.appGroupIdentities.allKeys ?: @[]];
+    input.installIdentifierKeysByBundleIdentifier = [installIdentifierKeys copy];
+    input.graphicsHostCapabilities = graphicsHostCapabilities;
+    input.networkType = [environmentPolicy selectedNetworkTypeWithError:&environmentPolicyError];
+    if (environmentPolicyError) {
+        if (error) *error = environmentPolicyError;
+        return NO;
     }
-    // Add AppContainerUUID
-    if ([self isIdentifierEnabled:@"AppContainerUUID"]) {
-        [self generateAppContainerUUID];
+
+    NSError *draftError = nil;
+    PXProfileManifest *manifest = [[[PXProfileGenerator alloc] init] generateManifestWithInput:input error:&draftError];
+    if (!manifest) {
+        if (error) *error = draftError;
+        return NO;
     }
-    // Add DeviceTheme
-    if ([self isIdentifierEnabled:@"DeviceTheme"]) {
-        [self generateDeviceTheme];
+    if (![store promoteManifest:manifest error:&draftError]) {
+        if (error) *error = draftError;
+        return NO;
+    }
+
+    [deviceManager setCurrentDeviceModel:manifest.device[@"identifier"]];
+    [[IOSVersionInfo sharedManager] setCurrentIOSVersionInfo:manifest.operatingSystem];
+    if (configuredLocation) {
+        [[LocationSpoofingManager sharedManager]
+            enableSpoofingWithLatitude:[configuredLocation[@"latitude"] doubleValue]
+            longitude:[configuredLocation[@"longitude"] doubleValue]];
+    } else if (locationWasCleared) {
+        [[LocationSpoofingManager sharedManager] disableSpoofing];
     }
     [self saveSettings];
+
+    if (publishNotifications) {
+        [self publishProfileGenerationNotifications];
+    }
+    return YES;
+}
+
+- (void)publishProfileGenerationNotifications {
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+    CFNotificationCenterPostNotification(darwinCenter,
+                                         CFSTR("com.hydra.projectx.profileGenerationChanged"),
+                                         NULL,
+                                         NULL,
+                                         YES);
+    CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.profileChanged"), NULL, NULL, YES);
+    CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.carrierDetailsChanged"), NULL, NULL, YES);
+    CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.networkConnectionTypeChanged"), NULL, NULL, YES);
+    CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.settings.changed"), NULL, NULL, YES);
 }
 
 #pragma mark - Settings Management
@@ -1047,7 +1127,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     
     // For WiFi specifically, also update the SystemConfiguration plist
     if ([type isEqualToString:@"WiFi"]) {
-        NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+        NSString *securitySettingsPath = PXSecuritySettingsPath();
         NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
         settingsDict[@"wifiSpoofEnabled"] = @(enabled);
         [settingsDict writeToFile:securitySettingsPath atomically:YES];
@@ -1064,7 +1144,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     }
     // For Battery specifically, update the SystemConfiguration plist
     else if ([type isEqualToString:@"Battery"]) {
-        NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+        NSString *securitySettingsPath = PXSecuritySettingsPath();
         NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
         settingsDict[@"batterySpoofEnabled"] = @(enabled);
         [settingsDict writeToFile:securitySettingsPath atomically:YES];
@@ -1081,7 +1161,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     }
     // For DeviceTheme, update the SystemConfiguration plist
     else if ([type isEqualToString:@"DeviceTheme"]) {
-        NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+        NSString *securitySettingsPath = PXSecuritySettingsPath();
         NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
         settingsDict[@"deviceThemeSpoofEnabled"] = @(enabled);
         [settingsDict writeToFile:securitySettingsPath atomically:YES];
@@ -1581,21 +1661,9 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         NSString *result = [[UserDefaultsUUIDManager sharedManager] currentUserDefaultsUUID];
         PXLog(@"Default UserDefaultsUUID value: %@", result ?: @"nil");
         return result;
-    } else if ([type isEqualToString:@"AppGroupUUID"]) {
-        NSString *result = [[AppGroupUUIDManager sharedManager] currentAppGroupUUID];
-        PXLog(@"Default AppGroupUUID value: %@", result ?: @"nil");
-        return result;
     } else if ([type isEqualToString:@"CoreDataUUID"]) {
         NSString *result = [[CoreDataUUIDManager sharedManager] currentCoreDataUUID];
         PXLog(@"Default CoreDataUUID value: %@", result ?: @"nil");
-        return result;
-    } else if ([type isEqualToString:@"AppInstallUUID"]) {
-        NSString *result = [[AppInstallUUIDManager sharedManager] currentAppInstallUUID];
-        PXLog(@"Default AppInstallUUID value: %@", result ?: @"nil");
-        return result;
-    } else if ([type isEqualToString:@"AppContainerUUID"]) {
-        NSString *result = [[AppContainerUUIDManager sharedManager] currentAppContainerUUID];
-        PXLog(@"Default AppContainerUUID value: %@", result ?: @"nil");
         return result;
     } else if ([type isEqualToString:@"DeviceName"]) {
         NSString *result = [[DeviceNameManager sharedManager] currentDeviceName];
@@ -1614,38 +1682,36 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
 #pragma mark - App Management
 
 - (void)refreshScopedAppsInfoIfNeeded {
+    @synchronized(self) {
+    NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, id> *> *updatedApps =
+        [[self scopedAppsSnapshot] mutableCopy];
     // Iterate through all scoped apps and update their version/build info
-    for (NSString *bundleID in self.scopedApps) {
+    for (NSString *bundleID in updatedApps) {
         LSApplicationProxy *appProxy = [LSApplicationProxy applicationProxyForIdentifier:bundleID];
         if (appProxy) {
             NSString *currentVersion = appProxy.shortVersionString;
             NSString *currentBuild = appProxy.bundleVersion ?: @"";
-            NSMutableDictionary *appInfo = self.scopedApps[bundleID];
+            NSMutableDictionary *appInfo = [updatedApps[bundleID] mutableCopy];
             BOOL needsUpdate = ![appInfo[@"version"] isEqualToString:currentVersion] ||
                                ![appInfo[@"build"] isEqualToString:currentBuild];
             if (needsUpdate) {
                 appInfo[@"version"] = currentVersion ?: @"";
                 appInfo[@"build"] = currentBuild ?: @"";
+                updatedApps[bundleID] = appInfo;
             }
         }
     }
+    [self publishScopedAppsSnapshot:updatedApps];
     [self saveSettings];
+    }
 }
 
 - (void)addApplicationToScope:(NSString *)bundleID {
-    if (!bundleID.length) {
+    @synchronized(self) {
+    if (!bundleID.length || !PXAppIdentityBundleIsEligible(bundleID, YES, NO)) {
         self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
                                        code:3001 
-                                   userInfo:@{NSLocalizedDescriptionKey: @"Invalid bundle ID"}];
-        return;
-    }
-    
-    // Prevent the WeaponX app itself from being added to the scope list
-    if ([bundleID isEqualToString:@"com.hydra.projectx"]) {
-        self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
-                                       code:3003 
-                                   userInfo:@{NSLocalizedDescriptionKey: @"Cannot add the WeaponX app itself to the scope list"}];
-        PXLog(@"[WeaponX] ⚠️ Prevented attempt to add the WeaponX app to the scope list");
+                                   userInfo:@{NSLocalizedDescriptionKey: @"Target App is not eligible"}];
         return;
     }
     
@@ -1679,28 +1745,269 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     appInfo[@"bundleID"] = bundleID;
     appInfo[@"originalBundleID"] = bundleID;  // Store original case-sensitive version
     
-    // Use the original case-sensitive bundle ID as the dictionary key
-    self.scopedApps[bundleID] = appInfo;
-    [self saveSettings];
-}
-
-- (void)removeApplicationFromScope:(NSString *)bundleID {
-    [self.scopedApps removeObjectForKey:bundleID];
-    [self saveSettings];
-}
-
-- (void)setApplication:(NSString *)bundleID enabled:(BOOL)enabled {
-    NSMutableDictionary *appInfo = [self.scopedApps[bundleID] mutableCopy];
-    if (appInfo) {
-        appInfo[@"enabled"] = @(enabled);
-        self.scopedApps[bundleID] = appInfo;
-        [self saveSettings];
+    NSMutableDictionary<NSString *, NSDictionary<NSString *, id> *> *updatedApps =
+        [[self scopedAppsSnapshot] mutableCopy];
+    [updatedApps removeObjectsForKeys:PXScopeKeysMatchingBundleIdentifier(updatedApps, bundleID)];
+    updatedApps[bundleID] = appInfo;
+    NSError *persistenceError = nil;
+    if (![self persistAndPublishScopedAppsSnapshot:updatedApps error:&persistenceError]) {
+        self.error = persistenceError;
+        return;
+    }
+    NSError *identityError = nil;
+    if (![self ensureApplicationIdentityForBundleIdentifier:bundleID
+                                           groupIdentifiers:[NSSet set]
+                                      installIdentifierKeys:[NSSet set]
+                                                       error:&identityError]) {
+        self.error = identityError;
+    }
     }
 }
 
+- (void)removeApplicationFromScope:(NSString *)bundleID {
+    @synchronized(self) {
+    NSMutableDictionary<NSString *, NSDictionary<NSString *, id> *> *updatedApps =
+        [[self scopedAppsSnapshot] mutableCopy];
+    [updatedApps removeObjectsForKeys:PXScopeKeysMatchingBundleIdentifier(updatedApps, bundleID)];
+    NSError *persistenceError = nil;
+    if (![self persistAndPublishScopedAppsSnapshot:updatedApps error:&persistenceError]) {
+        self.error = persistenceError;
+    }
+    }
+}
+
+- (BOOL)isApplicationInScope:(NSString *)bundleID {
+    if (!PXAppIdentityBundleIsEligible(bundleID, YES, NO)) {
+        return NO;
+    }
+    NSDictionary<NSString *, id> *appInfo =
+        PXScopeRecordForBundleIdentifier([self scopedAppsSnapshot], bundleID);
+    return [appInfo[@"enabled"] boolValue];
+}
+
+- (BOOL)writeScopedApps:(NSDictionary<NSString *, NSDictionary<NSString *, id> *> *)scopedApps
+                  error:(NSError **)error {
+    NSString *scopedAppsFile = PXGlobalScopePreferencesPath();
+    PXScopedAppStore *scopeStore = [[PXScopedAppStore alloc]
+        initWithFilePath:scopedAppsFile];
+    NSDictionary<NSString *, NSDictionary<NSString *, id> *> *eligibleScopedApps =
+        PXEligibleScopedApplications(scopedApps ?: @{});
+    if (![scopeStore replaceScopedApplications:eligibleScopedApps error:error]) {
+        return NO;
+    }
+    NSError *permissionError = nil;
+    if (![[NSFileManager defaultManager]
+        setAttributes:@{NSFilePosixPermissions: @0644, NSFileOwnerAccountName: @"mobile"}
+        ofItemAtPath:scopedAppsFile
+        error:&permissionError]) {
+        PXLog(@"[WeaponX] Scoped App permissions could not be updated: %@",
+              permissionError.localizedDescription);
+    }
+    return YES;
+}
+
+- (BOOL)setApplicationInScope:(NSString *)bundleID enabled:(BOOL)enabled error:(NSError **)error {
+    @synchronized(self) {
+    if (bundleID.length == 0 || !PXAppIdentityBundleIsEligible(bundleID, YES, NO)) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"com.hydra.projectx"
+                                         code:3001
+                                     userInfo:@{NSLocalizedDescriptionKey: @"Target App is not eligible"}];
+        }
+        return NO;
+    }
+    NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, id> *> *updatedApps =
+        [PXEligibleScopedApplications([self scopedAppsSnapshot]) mutableCopy];
+    [updatedApps removeObjectsForKeys:PXScopeKeysMatchingBundleIdentifier(updatedApps, bundleID)];
+    if (enabled) {
+        LSApplicationProxy *appProxy = [LSApplicationProxy applicationProxyForIdentifier:bundleID];
+        if (!appProxy) {
+            if (error) {
+                *error = [NSError errorWithDomain:@"com.hydra.projectx"
+                                             code:3002
+                                         userInfo:@{NSLocalizedDescriptionKey: @"Target App is not installed"}];
+            }
+            return NO;
+        }
+        updatedApps[bundleID] = [@{
+            @"name": appProxy.localizedName ?: bundleID,
+            @"version": appProxy.shortVersionString ?: @"",
+            @"build": appProxy.bundleVersion ?: @"",
+            @"installed": @YES,
+            @"enabled": @YES,
+            @"bundleID": bundleID,
+            @"originalBundleID": bundleID,
+            @"extensionPattern": [bundleID stringByAppendingString:@".*"]
+        } mutableCopy];
+    }
+    NSDictionary<NSString *, NSDictionary<NSString *, id> *> *previousApps =
+        [self scopedAppsSnapshot];
+    NSError *persistenceError = nil;
+    if (![self writeScopedApps:updatedApps error:&persistenceError]) {
+        self.error = persistenceError;
+        if (error) *error = persistenceError;
+        return NO;
+    }
+    NSError *pendingStateError = nil;
+    if (![[PXEnvironmentPolicyStore sharedStore] markPendingChangeWithError:&pendingStateError]) {
+        NSError *rollbackError = nil;
+        if (![self writeScopedApps:previousApps error:&rollbackError]) {
+            PXLog(@"[WeaponX] Scoped App rollback failed: %@", rollbackError.localizedDescription);
+        }
+        self.error = pendingStateError;
+        if (error) *error = pendingStateError;
+        return NO;
+    }
+    [self publishScopedAppsSnapshot:updatedApps];
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         CFSTR("com.hydra.projectx.scopedAppsChanged"),
+                                         NULL,
+                                         NULL,
+                                         YES);
+    return YES;
+    }
+}
+
+- (void)setApplication:(NSString *)bundleID enabled:(BOOL)enabled {
+    @synchronized(self) {
+    NSMutableDictionary<NSString *, NSDictionary<NSString *, id> *> *updatedApps =
+        [[self scopedAppsSnapshot] mutableCopy];
+    NSArray<NSString *> *matchingKeys = PXScopeKeysMatchingBundleIdentifier(updatedApps,
+                                                                             bundleID);
+    if (!PXAppIdentityBundleIsEligible(bundleID, YES, NO)) {
+        if (bundleID.length == 0) {
+            self.error = [NSError errorWithDomain:@"com.hydra.projectx"
+                                             code:3001
+                                         userInfo:@{NSLocalizedDescriptionKey:
+                                             @"Target App is not eligible"}];
+            return;
+        }
+        [updatedApps removeObjectsForKeys:matchingKeys];
+        if (enabled) {
+            self.error = [NSError errorWithDomain:@"com.hydra.projectx"
+                                             code:3001
+                                         userInfo:@{NSLocalizedDescriptionKey:
+                                             @"Target App is not eligible"}];
+        }
+        NSError *persistenceError = nil;
+        if (![self persistAndPublishScopedAppsSnapshot:updatedApps error:&persistenceError]) {
+            self.error = persistenceError;
+        }
+        return;
+    }
+    NSString *matchingKey = matchingKeys.firstObject;
+    NSMutableDictionary *appInfo = [updatedApps[matchingKey] mutableCopy];
+    if (appInfo) {
+        appInfo[@"enabled"] = @(enabled);
+        [updatedApps removeObjectsForKeys:matchingKeys];
+        updatedApps[bundleID] = appInfo;
+        NSError *persistenceError = nil;
+        if (![self persistAndPublishScopedAppsSnapshot:updatedApps error:&persistenceError]) {
+            self.error = persistenceError;
+            return;
+        }
+        if (enabled) {
+            NSError *identityError = nil;
+            NSSet<NSString *> *configuredKeys = [appInfo[@"installIdentifierKeys"] isKindOfClass:[NSArray class]]
+                ? [NSSet setWithArray:appInfo[@"installIdentifierKeys"]]
+                : [NSSet set];
+            if (![self ensureApplicationIdentityForBundleIdentifier:bundleID
+                                                   groupIdentifiers:[NSSet set]
+                                              installIdentifierKeys:configuredKeys
+                                                               error:&identityError]) {
+                self.error = identityError;
+            }
+        }
+    }
+    }
+}
+
+- (nullable PXAppIdentityRecord *)appIdentityForBundleIdentifier:(NSString *)bundleIdentifier {
+    NSString *identityDirectory = [self profileIdentityPath];
+    if (!identityDirectory) {
+        return nil;
+    }
+    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
+    return [store activeManifestWithError:nil].appIdentities[bundleIdentifier];
+}
+
+- (nullable PXAppGroupIdentityRecord *)appGroupIdentityForGroupIdentifier:(NSString *)groupIdentifier {
+    NSString *identityDirectory = [self profileIdentityPath];
+    if (!identityDirectory) {
+        return nil;
+    }
+    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
+    return [store activeManifestWithError:nil].appGroupIdentities[groupIdentifier];
+}
+
+- (BOOL)ensureApplicationIdentityForBundleIdentifier:(NSString *)bundleIdentifier
+                                     groupIdentifiers:(NSSet<NSString *> *)groupIdentifiers
+                                installIdentifierKeys:(NSSet<NSString *> *)installIdentifierKeys
+                                                 error:(NSError **)error {
+    NSString *identityDirectory = [self profileIdentityPath];
+    if (!identityDirectory) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"com.hydra.projectx.app-identity"
+                                         code:1
+                                     userInfo:@{NSLocalizedDescriptionKey: @"No active Profile identity directory"}];
+        }
+        return NO;
+    }
+    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
+    PXProfileManifest *beforeUpdate = [store activeManifestWithError:nil];
+    PXAppIdentityRecord *existingIdentity = beforeUpdate.appIdentities[bundleIdentifier];
+    NSError *prunedStateError = nil;
+    NSSet<NSString *> *prunedTargetBundleIdentifiers = [[PXEnvironmentPolicyStore sharedStore]
+        prunedTargetBundleIdentifiersWithError:&prunedStateError];
+    if (!prunedTargetBundleIdentifiers) {
+        if (error) *error = prunedStateError;
+        return NO;
+    }
+    if (!PXEnvironmentAllowsApplicationIdentityEnsure(bundleIdentifier,
+                                                       existingIdentity != nil,
+                                                       prunedTargetBundleIdentifiers)) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"com.hydra.projectx.app-identity"
+                                         code:2
+                                     userInfo:@{NSLocalizedDescriptionKey:
+                                         @"A reinstalled Target App requires a new environment generation"}];
+        }
+        return NO;
+    }
+    BOOL needsNotification = existingIdentity == nil ||
+        ![installIdentifierKeys isSubsetOfSet:existingIdentity.installIdentifierKeys];
+    if (!needsNotification) {
+        for (NSString *groupIdentifier in groupIdentifiers) {
+            if (!beforeUpdate.appGroupIdentities[groupIdentifier]) {
+                needsNotification = YES;
+                break;
+            }
+        }
+    }
+    if (![store ensureApplicationIdentityForBundleIdentifier:bundleIdentifier
+                                             groupIdentifiers:groupIdentifiers
+                                        installIdentifierKeys:installIdentifierKeys
+                                                         error:error]) {
+        return NO;
+    }
+    if (needsNotification) {
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                             CFSTR("com.hydra.projectx.appIdentityChanged"),
+                                             NULL,
+                                             NULL,
+                                             YES);
+    }
+    return YES;
+}
+
 - (NSDictionary *)getApplicationInfo:(NSString *)bundleID {
+    NSDictionary<NSString *, NSDictionary<NSString *, id> *> *scopeSnapshot =
+        [self scopedAppsSnapshot];
     if (bundleID) {
-        NSDictionary *appInfo = self.scopedApps[bundleID];
+        if (!PXAppIdentityBundleIsEligible(bundleID, YES, NO)) {
+            return nil;
+        }
+        NSDictionary *appInfo = PXScopeRecordForBundleIdentifier(scopeSnapshot, bundleID);
         if (appInfo) {
             return [appInfo mutableCopy];
         }
@@ -1709,7 +2016,8 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     
     // Return all apps with their original case-preserved bundle IDs
     NSMutableDictionary *displayApps = [NSMutableDictionary dictionary];
-    [self.scopedApps enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSDictionary *appInfo, BOOL *stop) {
+    [PXEligibleScopedApplications(scopeSnapshot)
+        enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSDictionary *appInfo, BOOL *stop) {
         NSMutableDictionary *displayInfo = [appInfo mutableCopy];
         NSString *originalBundleID = appInfo[@"originalBundleID"];
         if (originalBundleID) {
@@ -1723,22 +2031,29 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     return displayApps;
 }
 
-// Cache for application enabled status to reduce frequent lookups and logging
-static NSMutableDictionary *_appEnabledCache = nil;
-static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 seconds
-
 - (BOOL)isApplicationEnabled:(NSString *)bundleID {
     // Initialize cache if needed
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         _appEnabledCache = [NSMutableDictionary dictionary];
     });
+
+    @synchronized(self) {
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+
+    // Treat persisted scope as untrusted input. Legacy releases could write Apple
+    // system bundles here, so every runtime consumer must enforce current policy.
+    if (!PXDeviceIdentifierSpoofingIsAllowedForBundle(bundleID, YES)) {
+        if (bundleID.length > 0) {
+            _appEnabledCache[bundleID] = @{@"enabled": @NO, @"timestamp": @(now)};
+        }
+        return NO;
+    }
     
     // Check if we have a cached result that's still valid
     NSDictionary *cachedResult = _appEnabledCache[bundleID];
     if (cachedResult) {
         NSTimeInterval timestamp = [cachedResult[@"timestamp"] doubleValue];
-        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
         
         // If the cache hasn't expired, use it
         if (now - timestamp < _cacheExpirationTime) {
@@ -1749,7 +2064,6 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     // Only log once every 30 seconds per app to avoid spamming logs
     static NSString *lastLoggedApp = nil;
     static NSTimeInterval lastLogTime = 0;
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     BOOL shouldLog = ![lastLoggedApp isEqualToString:bundleID] || (now - lastLogTime > 30.0);
     
     if (shouldLog) {
@@ -1841,94 +2155,55 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     _appEnabledCache[bundleID] = @{@"enabled": @NO, @"timestamp": @(now)};
     
     return NO;
+    }
 }
 
 // New method to load scoped apps configuration explicitly
 - (void)loadScopedApps {
-    // Try rootless path first
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
-    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
+    @synchronized(self) {
+    NSString *scopedAppsFile = PXGlobalScopePreferencesPath();
     PXLog(@"[WeaponX] IdentifierManager DEBUG: Trying to load scoped apps from: %@", scopedAppsFile);
-    
-    // Fallback to standard path if rootless path doesn't exist
+
     NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:scopedAppsFile]) {
-        PXLog(@"[WeaponX] IdentifierManager DEBUG: First path not found, trying Dopamine 2 path");
-        // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
-        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        
-        // Fallback to older paths if needed
-        if (![fileManager fileExistsAtPath:scopedAppsFile]) {
-            PXLog(@"[WeaponX] IdentifierManager DEBUG: Dopamine 2 path not found, trying legacy path");
-            prefsPath = @"/var/mobile/Library/Preferences";
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        }
-    }
-    
+
     PXLog(@"[WeaponX] IdentifierManager DEBUG: Loading scoped apps from: %@", scopedAppsFile);
     PXLog(@"[WeaponX] IdentifierManager DEBUG: File exists: %@", [fileManager fileExistsAtPath:scopedAppsFile] ? @"YES" : @"NO");
     
-    // Load scoped apps from the global scope file
-    NSDictionary *scopedAppsDict = [NSDictionary dictionaryWithContentsOfFile:scopedAppsFile];
-    PXLog(@"[WeaponX] IdentifierManager DEBUG: Loaded dictionary: %@", scopedAppsDict ? @"YES" : @"NO");
-    
-    NSDictionary *savedApps = scopedAppsDict[@"ScopedApps"];
+    NSError *scopeError = nil;
+    NSDictionary *savedApps = [[[PXScopedAppStore alloc] initWithFilePath:scopedAppsFile]
+        scopedApplicationsWithError:&scopeError];
+    PXLog(@"[WeaponX] IdentifierManager DEBUG: Loaded dictionary: %@", savedApps ? @"YES" : @"NO");
     PXLog(@"[WeaponX] IdentifierManager DEBUG: Scoped apps entry found in dictionary: %@", savedApps ? @"YES" : @"NO");
     
     if (savedApps) {
+        NSDictionary<NSString *, NSDictionary<NSString *, id> *> *eligibleSavedApps =
+            PXEligibleScopedApplications(savedApps);
         PXLog(@"[WeaponX] IdentifierManager DEBUG: Number of scoped apps found: %lu", (unsigned long)savedApps.count);
         if (savedApps.count > 0) {
             PXLog(@"[WeaponX] IdentifierManager DEBUG: App list includes: %@", [savedApps allKeys]);
         }
-        // Make sure we properly update the scoped apps dictionary
-        if (!self.scopedApps) {
-            self.scopedApps = [savedApps mutableCopy];
-        } else {
-            [self.scopedApps setDictionary:savedApps];
-        }
+        [self publishScopedAppsSnapshot:eligibleSavedApps];
         PXLog(@"[WeaponX] IdentifierManager: Loaded %lu scoped apps from %@", (unsigned long)savedApps.count, scopedAppsFile);
     } else {
-        // Re-initialize the app list if loading failed
-        if (!self.scopedApps) {
-            self.scopedApps = [NSMutableDictionary dictionary];
-        } else {
-            [self.scopedApps removeAllObjects];
-        }
-        PXLog(@"[WeaponX] IdentifierManager: ⚠️ Failed to load scoped apps, using empty list");
+        [self publishScopedAppsSnapshot:@{}];
+        PXLog(@"[WeaponX] IdentifierManager: ⚠️ Failed to load scoped apps, using empty list: %@",
+              scopeError.localizedDescription ?: @"invalid scope");
     }
+    }
+}
+
+- (void)reloadApplicationScope {
+    [self loadScopedApps];
 }
 
 #pragma mark - Persistence
 
 - (void)saveSettings {
-    // Get the proper preferences path
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
-    NSString *prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
+    @synchronized(self) {
+    NSString *prefsPath = PXPreferencesDirectoryPath();
+    NSString *prefsFile = PXPreferencesFilePath(@"com.hydra.projectx.settings.plist");
     
-    // Global settings file for scoped apps (universal across all profiles)
-    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-    
-    // Fallback to standard path if rootless path doesn't exist
     NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:prefsPath]) {
-        // Try Dopamine 2 path first
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
-        prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        
-        // Fallback to standard path if needed
-        if (![fileManager fileExistsAtPath:prefsFile]) {
-            prefsPath = @"/var/mobile/Library/Preferences";
-            prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-            
-            // If still not found, try the original filename as a fallback
-            if (![fileManager fileExistsAtPath:prefsFile]) {
-                prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.plist"];
-            }
-        }
-    }
     
     // Ensure preferences directory exists with proper permissions
     NSError *dirError = nil;
@@ -1970,63 +2245,58 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     }
     
     // Save scoped apps separately in the global scope file
-    NSDictionary *scopedAppsDict = @{@"ScopedApps": [self.scopedApps copy]};
-    success = [scopedAppsDict writeToFile:scopedAppsFile atomically:YES];
-    if (!success) {
-        self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
-                                      code:4006 
-                                  userInfo:@{NSLocalizedDescriptionKey: @"Failed to save global scoped apps"}];
+    NSDictionary<NSString *, NSDictionary<NSString *, id> *> *eligibleScopedApps =
+        PXEligibleScopedApplications([self scopedAppsSnapshot]);
+    NSError *scopeError = nil;
+    if (![self writeScopedApps:eligibleScopedApps error:&scopeError]) {
+        self.error = scopeError;
         return;
     }
-    
-    // Set proper permissions for global scope file
+    [self publishScopedAppsSnapshot:eligibleScopedApps];
+
+    // Set proper permissions
     NSError *permError = nil;
     NSDictionary *fileAttributes = @{NSFilePosixPermissions: @0644,
                                    NSFileOwnerAccountName: @"mobile"};
-    
-    if (![fileManager setAttributes:fileAttributes
-                      ofItemAtPath:scopedAppsFile
-                             error:&permError]) {
-        NSLog(@"[ProjectX] Warning: Failed to set global scope file permissions: %@", permError);
-    }
-
-    // Set proper permissions
     if (![fileManager setAttributes:fileAttributes
                       ofItemAtPath:prefsFile
                              error:&permError]) {
         NSLog(@"[ProjectX] Warning: Failed to set preferences file permissions: %@", permError);
     }
+    }
 }
 
 - (void)loadSettings {
-    // Try rootless path first
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
-    NSString *prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-    
-    // Fallback to standard path if rootless path doesn't exist
+    @synchronized(self) {
+    NSString *prefsFile = PXPreferencesFilePath(@"com.hydra.projectx.settings.plist");
+    NSString *scopedAppsFile = PXGlobalScopePreferencesPath();
     NSFileManager *fileManager = [NSFileManager defaultManager];
+
+    // Preserve the previous settings filename only within the RootHide directory.
     if (![fileManager fileExistsAtPath:prefsFile]) {
-        // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
-        prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        
-        // Fallback to standard path if needed
-        if (![fileManager fileExistsAtPath:prefsFile]) {
-            prefsPath = @"/var/mobile/Library/Preferences";
-            prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-            
-            // If still not found, try the original filename as a fallback
-            if (![fileManager fileExistsAtPath:prefsFile]) {
-                prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.plist"];
-            }
-        }
+        prefsFile = PXPreferencesFilePath(@"com.hydra.projectx.plist");
     }
     
     // Load dictionary from main settings file
     NSDictionary *loadedDict = [NSDictionary dictionaryWithContentsOfFile:prefsFile];
+
+    // Load scope before any settings migration writes. A missing or malformed
+    // main settings plist must never erase a valid global target selection.
+    BOOL globalScopeExists = [fileManager fileExistsAtPath:scopedAppsFile];
+    NSError *scopeError = nil;
+    NSDictionary *savedApps = [[[PXScopedAppStore alloc] initWithFilePath:scopedAppsFile]
+        scopedApplicationsWithError:&scopeError];
+    if (!globalScopeExists && [loadedDict[@"ScopedApps"] isKindOfClass:[NSDictionary class]]) {
+        savedApps = loadedDict[@"ScopedApps"];
+        NSLog(@"[ProjectX] Loaded scoped apps from legacy location, will migrate to global file");
+    }
+    if (savedApps) {
+        [self publishScopedAppsSnapshot:PXEligibleScopedApplications(savedApps)];
+    } else {
+        [self publishScopedAppsSnapshot:@{}];
+        PXLog(@"[WeaponX] Invalid scoped-app state ignored: %@",
+              scopeError.localizedDescription ?: @"invalid scope");
+    }
     
     // Check if settings are initialized
     if (!loadedDict || ![loadedDict[@"SettingsInitialized"] boolValue]) {
@@ -2063,21 +2333,8 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
         [self.settings setDictionary:savedSettings];
     }
     
-    // Load scoped apps from the global scope file
-    NSDictionary *scopedAppsDict = [NSDictionary dictionaryWithContentsOfFile:scopedAppsFile];
-    NSDictionary *savedApps = scopedAppsDict[@"ScopedApps"];
-    
-    // If not found in global scope file, try the legacy location
-    if (!savedApps && loadedDict[@"ScopedApps"]) {
-        savedApps = loadedDict[@"ScopedApps"];
-        NSLog(@"[ProjectX] Loaded scoped apps from legacy location, will migrate to global file");
-    }
-    
-    if (savedApps) {
-        [self.scopedApps setDictionary:savedApps];
-    }
-    
     // We no longer load identifier values from global settings as they're profile-specific
+    }
 }
 
 #pragma mark - Error Handling
@@ -2133,7 +2390,8 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 }
 
 - (void)addApplicationWithExtensionsToScope:(NSString *)bundleID {
-    if (!bundleID || [bundleID isEqualToString:@"com.hydra.projectx"]) {
+    @synchronized(self) {
+    if (!PXAppIdentityBundleIsEligible(bundleID, YES, NO)) {
         return;
     }
     
@@ -2144,14 +2402,25 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     // Instead of just using first component, use the main app's bundle ID as base
     NSString *extensionPattern = [NSString stringWithFormat:@"%@.*", bundleID];
     
+    NSMutableDictionary<NSString *, NSDictionary<NSString *, id> *> *updatedApps =
+        [[self scopedAppsSnapshot] mutableCopy];
+    NSArray<NSString *> *matchingKeys = PXScopeKeysMatchingBundleIdentifier(updatedApps,
+                                                                             bundleID);
+    NSString *matchingKey = matchingKeys.firstObject;
     // Store the extension pattern in the app's info
-    NSMutableDictionary *appInfo = [self.scopedApps[bundleID] mutableCopy];
+    NSMutableDictionary *appInfo = [updatedApps[matchingKey] mutableCopy];
     if (appInfo) {
         appInfo[@"extensionPattern"] = extensionPattern;
-        self.scopedApps[bundleID] = appInfo;
-        [self saveScopedApps];
+        [updatedApps removeObjectsForKeys:matchingKeys];
+        updatedApps[bundleID] = appInfo;
+        NSError *persistenceError = nil;
+        if (![self persistAndPublishScopedAppsSnapshot:updatedApps error:&persistenceError]) {
+            self.error = persistenceError;
+            return;
+        }
         
         PXLog(@"[WeaponX] Added extension pattern: %@ for app: %@", extensionPattern, bundleID);
+    }
     }
 }
 
@@ -2184,7 +2453,8 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 }
 
 - (BOOL)shouldSpoofForBundle:(NSString *)bundleID {
-    if (!bundleID) return NO;
+    if (!PXDeviceIdentifierSpoofingIsAllowedForBundle(bundleID, YES)) return NO;
+    @synchronized(self) {
     
     // Check cache first
     NSNumber *cachedDecision = self.spoofCache[bundleID];
@@ -2193,7 +2463,9 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     }
     
     // Check if the app is directly in scope
-    BOOL isInScope = self.scopedApps[bundleID] != nil;
+    NSDictionary<NSString *, id> *appInfo =
+        PXScopeRecordForBundleIdentifier(self.scopedApps, bundleID);
+    BOOL isInScope = appInfo != nil;
     
     // If not directly in scope, check if it's an extension of a scoped app
     if (!isInScope) {
@@ -2205,7 +2477,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
         }
     } else {
         // If directly in scope, check if it's enabled
-        isInScope = [self.scopedApps[bundleID][@"enabled"] boolValue];
+        isInScope = [appInfo[@"enabled"] boolValue];
         
         if (isInScope) {
             PXLog(@"[WeaponX] Bundle ID %@ is directly enabled in scope", bundleID);
@@ -2217,60 +2489,29 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     self.spoofCache[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
     
     return isInScope;
+    }
 }
 
 - (void)saveScopedApps {
-    // Get the proper preferences path
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
-    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-    
-    // Fallback to standard path if rootless path doesn't exist
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:prefsPath]) {
-        // Try Dopamine 2 path first
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
-        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        
-        // Fallback to standard path if needed
-        if (![fileManager fileExistsAtPath:scopedAppsFile]) {
-            prefsPath = @"/var/mobile/Library/Preferences";
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        }
+    @synchronized(self) {
+    NSError *persistenceError = nil;
+    if (![self persistAndPublishScopedAppsSnapshot:[self scopedAppsSnapshot]
+                                             error:&persistenceError]) {
+        self.error = persistenceError;
     }
-    
-    // Save scoped apps separately in the global scope file
-    NSDictionary *scopedAppsDict = @{@"ScopedApps": [self.scopedApps copy]};
-    BOOL success = [scopedAppsDict writeToFile:scopedAppsFile atomically:YES];
-    if (!success) {
-        self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
-                                      code:4006 
-                                  userInfo:@{NSLocalizedDescriptionKey: @"Failed to save global scoped apps"}];
-        return;
-    }
-    
-    // Set proper permissions for global scope file
-    NSError *permError = nil;
-    NSDictionary *fileAttributes = @{NSFilePosixPermissions: @0644,
-                                   NSFileOwnerAccountName: @"mobile"};
-    
-    if (![fileManager setAttributes:fileAttributes
-                      ofItemAtPath:scopedAppsFile
-                             error:&permError]) {
-        NSLog(@"[ProjectX] Warning: Failed to set global scope file permissions: %@", permError);
     }
 }
 
 - (BOOL)isExtensionEnabled:(NSString *)bundleID {
-    if (!bundleID) return NO;
-    
-    // Never consider the WeaponX app itself or system apps
-    if ([bundleID isEqualToString:@"com.hydra.projectx"] || [bundleID hasPrefix:@"com.apple."]) {
+    if (!PXAppIdentityBundleIsEligible(bundleID, NO, YES)) {
         return NO;
     }
     
+    NSDictionary<NSString *, NSDictionary<NSString *, id> *> *scopeSnapshot =
+        [self scopedAppsSnapshot];
     // Check each scoped app's extension pattern
-    for (NSString *scopedBundleID in self.scopedApps) {
-        NSDictionary *appInfo = self.scopedApps[scopedBundleID];
+    for (NSString *scopedBundleID in scopeSnapshot) {
+        NSDictionary *appInfo = scopeSnapshot[scopedBundleID];
         NSString *extensionPattern = appInfo[@"extensionPattern"];
         
         if (extensionPattern && [self isBundleIDMatch:bundleID withPattern:extensionPattern]) {
@@ -2319,14 +2560,8 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
         filePath = [identityDir stringByAppendingPathComponent:@"keychain_uuid.plist"];
     } else if ([type isEqualToString:@"UserDefaultsUUID"]) {
         filePath = [identityDir stringByAppendingPathComponent:@"userdefaults_uuid.plist"];
-    } else if ([type isEqualToString:@"AppGroupUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"appgroup_uuid.plist"];
     } else if ([type isEqualToString:@"CoreDataUUID"]) {
         filePath = [identityDir stringByAppendingPathComponent:@"coredata_uuid.plist"];
-    } else if ([type isEqualToString:@"AppInstallUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"appinstall_uuid.plist"];
-    } else if ([type isEqualToString:@"AppContainerUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"appcontainer_uuid.plist"];
     } else {
         PXLog(@"[WeaponX] ❌ Unknown identifier type: %@", type);
         return NO;
@@ -2360,14 +2595,8 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
             [[KeychainUUIDManager sharedManager] setCurrentKeychainUUID:value];
         } else if ([type isEqualToString:@"UserDefaultsUUID"]) {
             [[UserDefaultsUUIDManager sharedManager] setCurrentUserDefaultsUUID:value];
-        } else if ([type isEqualToString:@"AppGroupUUID"]) {
-            [[AppGroupUUIDManager sharedManager] setCurrentAppGroupUUID:value];
         } else if ([type isEqualToString:@"CoreDataUUID"]) {
             [[CoreDataUUIDManager sharedManager] setCurrentCoreDataUUID:value];
-        } else if ([type isEqualToString:@"AppInstallUUID"]) {
-            [[AppInstallUUIDManager sharedManager] setCurrentAppInstallUUID:value];
-        } else if ([type isEqualToString:@"AppContainerUUID"]) {
-            [[AppContainerUUIDManager sharedManager] setCurrentAppContainerUUID:value];
         }
     }
     
@@ -2486,9 +2715,16 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 }
 
 - (BOOL)setCustomSystemBootUUID:(NSString *)value {
-    // Validate UUID format
     if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"SystemBootUUID"];
+    NSDictionary *projection = [NSDictionary dictionaryWithContentsOfFile:
+        [[self profileIdentityPath] stringByAppendingPathComponent:@"system_boot_uuid.plist"]];
+    if ([projection[@"value"] isEqualToString:value]) {
+        return YES;
+    }
+    self.error = [NSError errorWithDomain:@"com.hydra.projectx.profile-manifest"
+                                     code:103
+                                 userInfo:@{NSLocalizedDescriptionKey: @"Boot UUID changes require explicit Profile/session regeneration"}];
+    return NO;
 }
 
 - (BOOL)setCustomDyldCacheUUID:(NSString *)value {
@@ -2516,9 +2752,11 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 }
 
 - (BOOL)setCustomAppGroupUUID:(NSString *)value {
-    // Validate UUID format
-    if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"AppGroupUUID"];
+    (void)value;
+    self.error = [NSError errorWithDomain:@"com.hydra.projectx.app-identity"
+                                     code:2
+                                 userInfo:@{NSLocalizedDescriptionKey: @"Global App Group UUID values are no longer supported"}];
+    return NO;
 }
 
 - (BOOL)setCustomCoreDataUUID:(NSString *)value {
@@ -2528,15 +2766,19 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 }
 
 - (BOOL)setCustomAppInstallUUID:(NSString *)value {
-    // Validate UUID format
-    if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"AppInstallUUID"];
+    (void)value;
+    self.error = [NSError errorWithDomain:@"com.hydra.projectx.app-identity"
+                                     code:2
+                                 userInfo:@{NSLocalizedDescriptionKey: @"Global App Install UUID values are no longer supported"}];
+    return NO;
 }
 
 - (BOOL)setCustomAppContainerUUID:(NSString *)value {
-    // Validate UUID format
-    if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"AppContainerUUID"];
+    (void)value;
+    self.error = [NSError errorWithDomain:@"com.hydra.projectx.app-identity"
+                                     code:2
+                                 userInfo:@{NSLocalizedDescriptionKey: @"Global App Container UUID values are no longer supported"}];
+    return NO;
 }
 
 - (BOOL)validateUUID:(NSString *)uuid {
@@ -2766,24 +3008,14 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 
 - (BOOL)isCanvasFingerprintProtectionEnabled {
     // Read directly from the plist file - SINGLE SOURCE OF TRUTH
-    NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+    NSString *securitySettingsPath = PXSecuritySettingsPath();
     NSDictionary *settingsDict = [NSDictionary dictionaryWithContentsOfFile:securitySettingsPath];
-    
-    if (settingsDict) {
-        if (settingsDict[@"canvasFingerprintingEnabled"] != nil) {
-            return [settingsDict[@"canvasFingerprintingEnabled"] boolValue];
-        }
-        if (settingsDict[@"CanvasFingerprint"] != nil) {
-            return [settingsDict[@"CanvasFingerprint"] boolValue];
-        }
-    }
-    
-    return NO; // Default to disabled if settings file doesn't exist
+    return PXGraphicsProtectionIsEnabledForSettings(settingsDict);
 }
 
 - (BOOL)setCanvasFingerprintProtection:(BOOL)enabled {
     // Read and update the plist file directly - SINGLE SOURCE OF TRUTH
-    NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+    NSString *securitySettingsPath = PXSecuritySettingsPath();
     NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
     
     // Update with both key names for compatibility

@@ -1,0 +1,13 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+<title>ProjectX Logo</title>
+<desc>ProjectX local device environment management logo.</desc>
+<rect x="72" y="72" width="880" height="880" rx="224" fill="#4263EB"/>
+<rect x="104" y="104" width="816" height="816" rx="196" stroke="#FFFFFF" stroke-opacity=".14" stroke-width="8"/>
+<rect x="286" y="204" width="452" height="616" rx="92" stroke="#FFFFFF" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M452 272H572" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round" opacity=".92"/>
+<rect x="350" y="362" width="324" height="306" rx="72" fill="#FFFFFF" fill-opacity=".11" stroke="#FFFFFF" stroke-opacity=".18" stroke-width="10"/>
+<path d="M410 432L614 636" stroke="#FFFFFF" stroke-width="54" stroke-linecap="round"/>
+<path d="M614 432L410 636" stroke="#FFFFFF" stroke-width="54" stroke-linecap="round"/>
+<circle cx="702" cy="744" r="62" fill="#20A66A" stroke="#4263EB" stroke-width="24"/>
+<path d="M672 744L695 767L738 719" stroke="#FFFFFF" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

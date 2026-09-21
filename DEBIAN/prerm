@@ -1,6 +1,12 @@
 #!/bin/sh
 
-# Extremely simplified prerm script to avoid dpkg interruption
-# Do nothing that might interrupt dpkg
+set -eu
 
-exit 0 
+LAUNCHCTL="/bin/launchctl"
+LAUNCHDAEMON_LABEL="com.hydra.weaponx.guardian"
+
+if [ -x "$LAUNCHCTL" ]; then
+    "$LAUNCHCTL" bootout "system/$LAUNCHDAEMON_LABEL" 2>/dev/null || true
+fi
+
+exit 0

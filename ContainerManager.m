@@ -1,4 +1,5 @@
 #import "ContainerManager.h"
+#import "PXRootHidePath.h"
 #import <Foundation/Foundation.h>
 
 @interface ContainerManager ()
@@ -54,8 +55,7 @@
 #pragma mark - Directory Structure
 
 - (NSString *)profileBasePath:(NSString *)profileID {
-    NSString *basePath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-    return [basePath stringByAppendingPathComponent:profileID];
+    return PXProfileDirectoryPath(profileID);
 }
 
 - (NSString *)appBasePath:(NSString *)profileID bundleID:(NSString *)bundleID {
@@ -96,7 +96,8 @@
         return NO;
     }
     
-    NSString *appPath = [NSString stringWithFormat:@"/Applications/%@.app", bundleID];
+    NSString *appPath = PXRootFSPath(
+        [NSString stringWithFormat:@"/Applications/%@.app", bundleID]);
     return [self.fileManager fileExistsAtPath:appPath];
 }
 
@@ -105,17 +106,7 @@
         return nil;
     }
     
-    // Check if we're in a rootless environment
-    BOOL isRootless = [[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"];
-    
-    if (isRootless) {
-        // If the path starts with /var/mobile, prepend /var/jb
-        if ([path hasPrefix:@"/var/mobile"]) {
-            return [@"/var/jb" stringByAppendingString:path];
-        }
-    }
-    
-    return path;
+    return [path hasPrefix:@"/"] ? PXRootFSPath(path) : path;
 }
 
 @end 

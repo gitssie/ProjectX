@@ -1,9 +1,6 @@
 #import "DomainBlockingSettings.h"
+#import "PXRootHidePath.h"
 
-// Multiple possible paths for rootless jailbreak compatibility
-static NSString *const kDomainBlockingSettingsFile = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.domainblocking.plist";
-static NSString *const kDomainBlockingSettingsFileAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.domainblocking.plist";
-static NSString *const kDomainBlockingSettingsFileAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.domainblocking.plist";
 static NSString *const kIsEnabledKey = @"isEnabled";
 static NSString *const kBlockedDomainsKey = @"blockedDomains";
 static NSString *const kCustomDomainsKey = @"customDomains";
@@ -12,25 +9,9 @@ static NSString *const kCustomDomainsKey = @"customDomains";
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *customDomainsStatus;
 @end
 
-// Helper function to find the correct settings file path
 static NSString *getSettingsFilePath(void) {
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    // Try each possible path in order of preference
-    NSArray *possiblePaths = @[
-        kDomainBlockingSettingsFile,        // Primary rootless path
-        kDomainBlockingSettingsFileAlt1,    // Alternative rootless path  
-        kDomainBlockingSettingsFileAlt2     // Legacy non-rootless path
-    ];
-    
-    for (NSString *path in possiblePaths) {
-        if ([fileManager fileExistsAtPath:path]) {
-            return path;
-        }
-    }
-    
-    // If no file exists, return the primary path for creating new file
-    return kDomainBlockingSettingsFile;
+    return [PXPreferencesDirectoryPath()
+        stringByAppendingPathComponent:@"com.hydra.projectx.domainblocking.plist"];
 }
 
 // Helper function to ensure directory exists before saving

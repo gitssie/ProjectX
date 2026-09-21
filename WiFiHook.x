@@ -7,6 +7,9 @@
 #import "ProjectXLogging.h"
 #import "WiFiManager.h"
 #import "MethodSwizzler.h"
+#import "PXRootHidePath.h"
+#import "PXProcessHookPolicy.h"
+#import "IdentifierManager.h"
 #import <ellekit/ellekit.h>
 #import <Network/Network.h>
 #import <SystemConfiguration/SystemConfiguration.h>
@@ -14,9 +17,7 @@
 #import <net/if.h>
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+#define kScopedAppsPath PXGlobalScopePreferencesPath()
 
 // Scoped apps cache
 static NSMutableDictionary *scopedAppsCache = nil;
@@ -81,7 +82,7 @@ static NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes in seconds
 
 // Forward declarations
 static NSString *getCurrentBundleID(void);
-static NSDictionary *loadScopedApps(void);
+static NSDictionary *loadScopedApps(void) __attribute__((unused));
 static BOOL isInScopedAppsList(void);
 
 #pragma mark - Profile Detection Helpers
@@ -103,15 +104,6 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
         }
     }
     
-    // Skip spoofing for system apps
-    if ([bundleID hasPrefix:@"com.apple."] && 
-        ![bundleID isEqualToString:@"com.apple.mobilesafari"] &&
-        ![bundleID isEqualToString:@"com.apple.webapp"]) {
-        cachedBundleDecisions[bundleID] = @NO;
-        cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-        return NO;
-    }
-    
     // Check if the current app is a scoped app
     BOOL isScoped = isInScopedAppsList();
     
@@ -125,7 +117,7 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
 // Helper function to directly get current profile ID from plist
 static NSString *getCurrentProfileID(void) {
     // Direct access to the current profile info plist
-    NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *centralInfoPath = PXCurrentProfileInfoPath();
     NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
     
     NSString *profileId = centralInfo[@"ProfileId"];
@@ -134,7 +126,7 @@ static NSString *getCurrentProfileID(void) {
     }
     
     // Fallback to legacy location if needed
-    NSString *legacyInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+    NSString *legacyInfoPath = PXActiveProfileInfoPath();
     NSDictionary *legacyInfo = [NSDictionary dictionaryWithContentsOfFile:legacyInfoPath];
     profileId = legacyInfo[@"ProfileId"];
     
@@ -144,7 +136,7 @@ static NSString *getCurrentProfileID(void) {
     
     // Last resort - scan for profiles
     NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *profilesDir = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+    NSString *profilesDir = PXProfilesDirectoryPath();
     NSError *error = nil;
     NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
     
@@ -196,7 +188,7 @@ static NSDictionary *getProfileWiFiInfo(void) {
     }
     
     // Build path to WiFi info file in profile directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = PXProfileDirectoryPath(profileId);
     NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
     NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
     NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
@@ -303,6 +295,7 @@ static CFDictionaryRef replaced_CNCopyCurrentNetworkInfo(CFStringRef interfaceNa
             spoofedInfo[@"BSSID"] = cachedWifiInfo[@"bssid"];
             spoofedInfo[@"NetworkType"] = cachedWifiInfo[@"networkType"] ?: @"Infrastructure";
             
+            if (originalDict) CFRelease(originalDict);
             return CFBridgingRetain(spoofedInfo);
         }
         
@@ -321,6 +314,7 @@ static CFDictionaryRef replaced_CNCopyCurrentNetworkInfo(CFStringRef interfaceNa
             spoofedInfo[@"BSSID"] = wifiInfo[@"bssid"];
             spoofedInfo[@"NetworkType"] = wifiInfo[@"networkType"] ?: @"Infrastructure";
             
+            if (originalDict) CFRelease(originalDict);
             return CFBridgingRetain(spoofedInfo);
         }
     } @catch (NSException *exception) {
@@ -766,6 +760,9 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
 
 %ctor {
     @autoreleasepool {
+        if (!PXCurrentProcessMayInstallApplicationHooks()) {
+            return;
+        }
         @try {
             PXLog(@"[WiFiHook] Initializing WiFi hooks");
             
@@ -774,21 +771,6 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
             
             // Skip if we can't get bundle ID
             if (!bundleID || [bundleID length] == 0) {
-                return;
-            }
-            
-            // Skip if this is a system process (except allowed ones)
-            if ([bundleID hasPrefix:@"com.apple."] && 
-                ![bundleID isEqualToString:@"com.apple.mobilesafari"] &&
-                ![bundleID isEqualToString:@"com.apple.webapp"]) {
-                PXLog(@"[WiFiHook] Not hooking system process: %@", bundleID);
-                return;
-            }
-            
-            // Skip our own apps
-            if ([bundleID isEqualToString:@"com.hydra.projectx"] || 
-                [bundleID isEqualToString:@"com.hydra.weaponx"]) {
-                PXLog(@"[WiFiHook] Not hooking own app: %@", bundleID);
                 return;
             }
             
@@ -880,7 +862,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
+        NSArray *possiblePaths = @[kScopedAppsPath];
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *validPath = nil;
         
@@ -932,25 +914,8 @@ static NSDictionary *loadScopedApps(void) {
 static BOOL isInScopedAppsList(void) {
     @try {
         NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        
-        // Check if this bundle ID is in the scoped apps dictionary
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        
-        // Check if the app is enabled
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-        
+        return bundleID.length > 0 &&
+            [[IdentifierManager sharedManager] shouldSpoofForBundle:bundleID];
     } @catch (NSException *e) {
         return NO;
     }

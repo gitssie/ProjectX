@@ -1,5 +1,6 @@
 #import "FileManagerViewController.h"
 #import "PlistViewerViewController.h"
+#import "PXRootHidePath.h"
 #import <objc/runtime.h>
 
 // Constants for operation types
@@ -45,7 +46,7 @@ typedef NS_ENUM(NSInteger, FileOperationType) {
 - (instancetype)initWithPath:(NSString *)path sourceFilePath:(NSString *)sourceFilePath operationType:(NSInteger)operationType {
     self = [super init];
     if (self) {
-        _currentPath = path ? path : @"/var/jb";
+        _currentPath = path ? path : PXJBRootPath(@"/");
         _fileManager = [NSFileManager defaultManager];
         _sourceFilePath = sourceFilePath;
         _operationType = operationType;
@@ -57,7 +58,7 @@ typedef NS_ENUM(NSInteger, FileOperationType) {
 - (instancetype)initWithPath:(NSString *)path sourceFilePaths:(NSArray<NSString *> *)sourceFilePaths operationType:(NSInteger)operationType {
     self = [super init];
     if (self) {
-        _currentPath = path ? path : @"/var/jb";
+        _currentPath = path ? path : PXJBRootPath(@"/");
         _fileManager = [NSFileManager defaultManager];
         _sourceFilePaths = sourceFilePaths;
         _operationType = operationType;
@@ -81,7 +82,7 @@ typedef NS_ENUM(NSInteger, FileOperationType) {
     self.navigationItem.leftBarButtonItem = closeButton;
     
     // Add navigation back button if not at root
-    if (![self.currentPath isEqualToString:@"/var/jb"]) {
+    if (![self.currentPath isEqualToString:PXJBRootPath(@"/")]) {
         self.navigationBackButton = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.up.doc"]
                                                                      style:UIBarButtonItemStylePlain
                                                                     target:self
@@ -244,7 +245,7 @@ typedef NS_ENUM(NSInteger, FileOperationType) {
 
 - (void)navigateToParentDirectory {
     NSString *parentPath = [self.currentPath stringByDeletingLastPathComponent];
-    if ([parentPath hasPrefix:@"/var/jb"]) {
+    if ([parentPath hasPrefix:PXJBRootPath(@"/")]) {
         // Create new view controller, preserving operation state
         FileManagerViewController *fileManagerVC;
         if (self.sourceFilePaths.count > 0) {
@@ -539,7 +540,7 @@ typedef NS_ENUM(NSInteger, FileOperationType) {
 }
 
 - (NSString *)displayNameForPath:(NSString *)path {
-    if ([path isEqualToString:@"/var/jb"]) {
+    if ([path isEqualToString:PXJBRootPath(@"/")]) {
         return @"Root";
     }
     
@@ -810,7 +811,7 @@ typedef NS_ENUM(NSInteger, FileOperationType) {
 - (void)handleSwipeGesture:(UISwipeGestureRecognizer *)gesture {
     if (gesture.direction == UISwipeGestureRecognizerDirectionRight) {
         // Only navigate back if not at root
-        if (![self.currentPath isEqualToString:@"/var/jb"]) {
+        if (![self.currentPath isEqualToString:PXJBRootPath(@"/")]) {
             [self navigateToParentDirectory];
         }
     }
@@ -1028,7 +1029,7 @@ typedef NS_ENUM(NSInteger, FileOperationType) {
                                                                                       action:@selector(refreshDirectory)];
         [rightBarItems addObject:refreshButton];
         
-        if (![self.currentPath isEqualToString:@"/var/jb"]) {
+        if (![self.currentPath isEqualToString:PXJBRootPath(@"/")]) {
             [rightBarItems addObject:self.navigationBackButton];
         }
         

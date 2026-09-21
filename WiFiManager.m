@@ -1,6 +1,7 @@
 #import "WiFiManager.h"
 #import "ProfileManager.h"
 #import "ProjectXLogging.h"
+#import "PXRootHidePath.h"
 #import <Security/Security.h>
 
 @interface WiFiManager ()
@@ -73,7 +74,7 @@
     }
     
     // Fallback to direct file read if ProfileManager isn't available
-    NSString *currentProfileInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *currentProfileInfoPath = PXCurrentProfileInfoPath();
     NSDictionary *profileInfo = [NSDictionary dictionaryWithContentsOfFile:currentProfileInfoPath];
     
     if (profileInfo && profileInfo[@"ProfileId"]) {
@@ -107,8 +108,7 @@
     self.currentProfileId = profileId;
     
     // Build path to WiFi info file in profile directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
-    NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
+    NSString *identityDir = PXProfileIdentityDirectoryPath(profileId);
     NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
     
     // Check if file exists
@@ -137,8 +137,7 @@
     self.currentProfileId = profileId;
     
     // Build path to WiFi info file in profile directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
-    NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
+    NSString *identityDir = PXProfileIdentityDirectoryPath(profileId);
     NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
     
     // Ensure directory exists
@@ -532,9 +531,12 @@
         [self loadWiFiInfoFromCurrentProfile];
     }
     
-    // If still no info, generate new
+    // Ordinary reads must never create a partial Profile generation.
     if (self.wifiInfo.count == 0) {
-        return [self generateWiFiInfo];
+        self.error = [NSError errorWithDomain:@"com.hydra.projectx"
+                                         code:3002
+                                     userInfo:@{NSLocalizedDescriptionKey: @"No WiFi identity exists in the active Profile generation"}];
+        return @{};
     }
     
     PXLog(@"[WiFiManager] Returning WiFi info: SSID=%@, BSSID=%@", 
@@ -654,4 +656,4 @@
     }
 }
 
-@end 
+@end

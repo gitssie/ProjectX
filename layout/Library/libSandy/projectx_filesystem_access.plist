@@ -8,26 +8,26 @@
 	</array>
 	<key>extensions</key>
 	<array>
-		<string>file-read* SANDBOX_REDIRECTED_PATH=/var/mobile/Containers/Data/Application/*</string>
-		<string>file-write* SANDBOX_REDIRECTED_PATH=/var/mobile/Containers/Data/Application/*</string>
-		<string>file-read* SANDBOX_REDIRECTED_PATH=/var/mobile/Library/Preferences/*</string>
-		<string>file-write* SANDBOX_REDIRECTED_PATH=/var/mobile/Library/Preferences/*</string>
-		<string>file-read* SANDBOX_REDIRECTED_PATH=/var/mobile/Library/*</string>
-		<string>file-write* SANDBOX_REDIRECTED_PATH=/var/mobile/Library/*</string>
-		<string>file-read* SANDBOX_REDIRECTED_PATH=/var/mobile/Library/Caches/*</string>
-		<string>file-write* SANDBOX_REDIRECTED_PATH=/var/mobile/Library/Caches/*</string>
-		<string>file-read* SANDBOX_REDIRECTED_PATH=/var/tmp/*</string>
-		<string>file-write* SANDBOX_REDIRECTED_PATH=/var/tmp/*</string>
-		<string>file-read* SANDBOX_REDIRECTED_PATH=/private/var/mobile/Containers/Data/Application/*</string>
-		<string>file-write* SANDBOX_REDIRECTED_PATH=/private/var/mobile/Containers/Data/Application/*</string>
-		<string>file-read* SANDBOX_REDIRECTED_PATH=/private/var/mobile/Library/Preferences/*</string>
-		<string>file-write* SANDBOX_REDIRECTED_PATH=/private/var/mobile/Library/Preferences/*</string>
-		<string>file-read* SANDBOX_REDIRECTED_PATH=/private/var/mobile/Library/*</string>
-		<string>file-write* SANDBOX_REDIRECTED_PATH=/private/var/mobile/Library/*</string>
-		<string>file-read* SANDBOX_REDIRECTED_PATH=/private/var/mobile/Library/Caches/*</string>
-		<string>file-write* SANDBOX_REDIRECTED_PATH=/private/var/mobile/Library/Caches/*</string>
-		<string>file-read* SANDBOX_REDIRECTED_PATH=/private/var/tmp/*</string>
-		<string>file-write* SANDBOX_REDIRECTED_PATH=/private/var/tmp/*</string>
+		<string>file-read* SANDBOX_REDIRECTED_PATH=/rootfs/var/mobile/Containers/Data/Application/*</string>
+		<string>file-write* SANDBOX_REDIRECTED_PATH=/rootfs/var/mobile/Containers/Data/Application/*</string>
+		<string>file-read* SANDBOX_REDIRECTED_PATH=/rootfs/var/mobile/Library/Preferences/*</string>
+		<string>file-write* SANDBOX_REDIRECTED_PATH=/rootfs/var/mobile/Library/Preferences/*</string>
+		<string>file-read* SANDBOX_REDIRECTED_PATH=/rootfs/var/mobile/Library/*</string>
+		<string>file-write* SANDBOX_REDIRECTED_PATH=/rootfs/var/mobile/Library/*</string>
+		<string>file-read* SANDBOX_REDIRECTED_PATH=/rootfs/var/mobile/Library/Caches/*</string>
+		<string>file-write* SANDBOX_REDIRECTED_PATH=/rootfs/var/mobile/Library/Caches/*</string>
+		<string>file-read* SANDBOX_REDIRECTED_PATH=/rootfs/var/tmp/*</string>
+		<string>file-write* SANDBOX_REDIRECTED_PATH=/rootfs/var/tmp/*</string>
+		<string>file-read* SANDBOX_REDIRECTED_PATH=/rootfs/private/var/mobile/Containers/Data/Application/*</string>
+		<string>file-write* SANDBOX_REDIRECTED_PATH=/rootfs/private/var/mobile/Containers/Data/Application/*</string>
+		<string>file-read* SANDBOX_REDIRECTED_PATH=/rootfs/private/var/mobile/Library/Preferences/*</string>
+		<string>file-write* SANDBOX_REDIRECTED_PATH=/rootfs/private/var/mobile/Library/Preferences/*</string>
+		<string>file-read* SANDBOX_REDIRECTED_PATH=/rootfs/private/var/mobile/Library/*</string>
+		<string>file-write* SANDBOX_REDIRECTED_PATH=/rootfs/private/var/mobile/Library/*</string>
+		<string>file-read* SANDBOX_REDIRECTED_PATH=/rootfs/private/var/mobile/Library/Caches/*</string>
+		<string>file-write* SANDBOX_REDIRECTED_PATH=/rootfs/private/var/mobile/Library/Caches/*</string>
+		<string>file-read* SANDBOX_REDIRECTED_PATH=/rootfs/private/var/tmp/*</string>
+		<string>file-write* SANDBOX_REDIRECTED_PATH=/rootfs/private/var/tmp/*</string>
 	</array>
 	<key>sandbox-extensions</key>
 	<array>
@@ -35,7 +35,7 @@
 			<key>extension_class</key>
 			<string>com.apple.app-sandbox.read-write</string>
 			<key>path</key>
-			<string>/var/jb/var/mobile/Library/WeaponX</string>
+			<string>/var/mobile/Library/WeaponX</string>
 			<key>type</key>
 			<string>file</string>
 		</dict>
@@ -43,7 +43,7 @@
 			<key>extension_class</key>
 			<string>com.apple.app-sandbox.read-write</string>
 			<key>path</key>
-			<string>/var/mobile/Library/Keychains</string>
+			<string>/rootfs/var/mobile/Library/Keychains</string>
 			<key>type</key>
 			<string>file</string>
 		</dict>

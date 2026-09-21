@@ -1,8 +1,10 @@
 #import "LocationSpoofingManager.h"
+#import "LocationSession.h"
+#import "ProfileManifest.h"
 #import "ProjectXLogging.h"
+#import "PXRootHidePath.h"
 
 // Constants
-static NSString *ROOT_PREFIX = @"/var/jb"; // For rootless jailbreak
 static NSString *PLIST_NAME = @"com.weaponx.gpsspoofing.plist";
 static NSString *GLOBAL_SCOPE_PLIST = @"com.hydra.projectx.global_scope.plist";
 
@@ -33,6 +35,9 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
 @property (nonatomic, strong) NSArray<CLLocation *> *pathLocations;
 @property (nonatomic, copy) void (^pathCompletionHandler)(BOOL);
 @property (nonatomic, assign) double pathSpeed;
+@property (nonatomic, strong) PXLocationSessionCache *locationSessionCache;
+@property (nonatomic, strong) PXProfileManifest *cachedLocationManifest;
+@property (nonatomic, copy) NSDictionary *externalRouteSegment;
 
 @end
 
@@ -70,6 +75,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         _lastReportedSpeed = 0.0;
         _lastReportedCourse = 0.0;
         _positionVariationsEnabled = YES; // Enable position variations by default for realistic movement
+        _locationSessionCache = [[PXLocationSessionCache alloc] init];
         
         PXLog(@"[WeaponX] LocationSpoofingManager initialized with position variations %@", 
               _positionVariationsEnabled ? @"ENABLED" : @"DISABLED");
@@ -202,6 +208,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
                                                               @"longitude": @(longitude),
                                                               @"enabled": @YES
                                                           }];
+        [self publishVirtualLocationConfigurationChanged];
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] Exception while enabling GPS spoofing: %@", exception);
     }
@@ -225,6 +232,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         if (settings) {
             // Remove PinnedLocation but keep toggle state
             [settings removeObjectForKey:@"PinnedLocation"];
+            [settings removeObjectForKey:@"ActiveRouteSegment"];
             
             // Write to file
             BOOL success = [settings writeToFile:plistPath atomically:YES];
@@ -242,6 +250,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
                                                           userInfo:@{
                                                               @"enabled": @NO
                                                           }];
+        [self publishVirtualLocationConfigurationChanged];
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] Exception while removing pinned location: %@", exception);
     }
@@ -250,54 +259,13 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
 #pragma mark - Settings Management
 
 - (NSString *)spoofingPlistPath {
-    @try {
-        // Try rootless path first
-        NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:[@"/var/mobile/Library/Preferences/" stringByAppendingString:PLIST_NAME]];
-        
-        // Check if file exists at rootless path
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        if (![fileManager fileExistsAtPath:plistPath]) {
-            // Try Dopamine 2 path
-            plistPath = [ROOT_PREFIX stringByAppendingPathComponent:[@"/private/var/mobile/Library/Preferences/" stringByAppendingString:PLIST_NAME]];
-            
-            // Fallback to non-rootless path if needed
-            if (![fileManager fileExistsAtPath:plistPath]) {
-                plistPath = [@"/var/mobile/Library/Preferences/" stringByAppendingString:PLIST_NAME];
-            }
-        }
-        
-        PXLog(@"[WeaponX] Using GPS spoofing plist path: %@", plistPath);
-        return plistPath;
-    } @catch (NSException *exception) {
-        PXLog(@"[WeaponX] Exception getting spoofing plist path: %@", exception);
-        // Fallback to default path
-        return [@"/var/mobile/Library/Preferences/" stringByAppendingString:PLIST_NAME];
-    }
+    NSString *plistPath = PXPreferencesFilePath(PLIST_NAME);
+    PXLog(@"[WeaponX] Using GPS spoofing plist path: %@", plistPath);
+    return plistPath;
 }
 
 - (NSString *)globalScopePlistPath {
-    @try {
-        // Try rootless path first
-        NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:[@"/var/mobile/Library/Preferences/" stringByAppendingString:GLOBAL_SCOPE_PLIST]];
-        
-        // Check if file exists at rootless path
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        if (![fileManager fileExistsAtPath:plistPath]) {
-            // Try Dopamine 2 path
-            plistPath = [ROOT_PREFIX stringByAppendingPathComponent:[@"/private/var/mobile/Library/Preferences/" stringByAppendingString:GLOBAL_SCOPE_PLIST]];
-            
-            // Fallback to non-rootless path if needed
-            if (![fileManager fileExistsAtPath:plistPath]) {
-                plistPath = [@"/var/mobile/Library/Preferences/" stringByAppendingString:GLOBAL_SCOPE_PLIST];
-            }
-        }
-        
-        return plistPath;
-    } @catch (NSException *exception) {
-        PXLog(@"[WeaponX] Exception getting global scope plist path: %@", exception);
-        // Fallback to default path
-        return [@"/var/mobile/Library/Preferences/" stringByAppendingString:GLOBAL_SCOPE_PLIST];
-    }
+    return PXPreferencesFilePath(GLOBAL_SCOPE_PLIST);
 }
 
 - (void)saveSpoofingLocation:(NSDictionary *)location {
@@ -317,6 +285,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         
         // Save as PinnedLocation
         settings[@"PinnedLocation"] = location;
+        [settings removeObjectForKey:@"ActiveRouteSegment"];
         
         // Write to file
         BOOL success = [settings writeToFile:plistPath atomically:YES];
@@ -375,26 +344,11 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         
         lastLoadTime = currentTime;
         
-        // Try rootless path first
-        NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+        NSString *prefsPath = PXPreferencesDirectoryPath();
         NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
         PXLog(@"[WeaponX] LocationSpoofingManager: Trying to load scoped apps from: %@", scopedAppsFile);
-        
-        // Fallback to standard path if rootless path doesn't exist
+
         NSFileManager *fileManager = [NSFileManager defaultManager];
-        if (![fileManager fileExistsAtPath:scopedAppsFile]) {
-            PXLog(@"[WeaponX] LocationSpoofingManager: First path not found, trying Dopamine 2 path");
-            // Try Dopamine 2 path
-            prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-            
-            // Fallback to older paths if needed
-            if (![fileManager fileExistsAtPath:scopedAppsFile]) {
-                PXLog(@"[WeaponX] LocationSpoofingManager: Dopamine 2 path not found, trying legacy path");
-                prefsPath = @"/var/mobile/Library/Preferences";
-                scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-            }
-        }
         
         PXLog(@"[WeaponX] LocationSpoofingManager: Loading scoped apps from: %@", scopedAppsFile);
         PXLog(@"[WeaponX] LocationSpoofingManager: File exists: %@", [fileManager fileExistsAtPath:scopedAppsFile] ? @"YES" : @"NO");
@@ -475,70 +429,285 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
     if (!originalLocation) {
         return originalLocation;
     }
-    
+
     @synchronized(self) {
-        // Double-check spoofing is enabled and we have a valid pinned location
         if (![self isSpoofingEnabled]) {
+            [self.locationSessionCache invalidate];
             return originalLocation;
         }
-        
-        // Ensure we have valid coordinates
+        if (PXLocationSampleForLocation(originalLocation)) {
+            return originalLocation;
+        }
+
         double safeLatitude = [self getSpoofedLatitude];
         double safeLongitude = [self getSpoofedLongitude];
-        
-        // Quick validation check - avoid expensive logging
-        if (isnan(safeLatitude) || isnan(safeLongitude) || 
-            isinf(safeLatitude) || isinf(safeLongitude) ||
+        if (!isfinite(safeLatitude) || !isfinite(safeLongitude) ||
             !CLLocationCoordinate2DIsValid(CLLocationCoordinate2DMake(safeLatitude, safeLongitude))) {
             return originalLocation;
         }
-        
-        // Create a realistic spoofed location
-        CLLocationCoordinate2D baseCoordinate = CLLocationCoordinate2DMake(safeLatitude, safeLongitude);
-        
-        // Add randomized position variations if enabled
-        if (self.positionVariationsEnabled) {
-            // Generate random angle in radians (0-360 degrees) for true omnidirectional movement
-            double randomAngle = (arc4random_uniform(360) * M_PI) / 180.0;
-            
-            // Determine variation distance based on transportation mode
-            double variationDistance;
-            switch (self.transportationMode) {
-                case TransportationModeDriving:
-                    // Larger variations for driving (2-8 meters)
-                    variationDistance = 2.0 + ((arc4random_uniform(60)) / 10.0);
-                    break;
-                    
-                case TransportationModeWalking:
-                    // Medium variations for walking (1-5 meters)
-                    variationDistance = 1.0 + ((arc4random_uniform(40)) / 10.0);
-                    break;
-                    
-                default: // Stationary
-                    // Small variations for stationary (0.5-2 meters)
-                    variationDistance = 0.5 + ((arc4random_uniform(15)) / 10.0);
-                    break;
-            }
-            
-            // Convert distance and angle to latitude/longitude offsets
-            // This uses the haversine formula approximation for small distances
-            double latOffset = variationDistance * cos(randomAngle) / 111000.0; // Approx meters to degrees lat
-            double lonOffset = variationDistance * sin(randomAngle) / (111000.0 * cos(baseCoordinate.latitude * M_PI / 180.0)); // Adjust for longitude compression
-            
-            // Apply the offsets to create realistic movement in any direction
-            baseCoordinate.latitude += latOffset;
-            baseCoordinate.longitude += lonOffset;
+
+        PXProfileManifest *manifest = [self activeLocationManifest];
+        PXLocationSession *session = [self.locationSessionCache
+            sessionForGenerationID:manifest.generationID
+            seed:manifest.seed];
+        if (!session) {
+            return originalLocation;
         }
-        
-        // Create a new location with the spoofed coordinates and additional properties
-        CLLocation *spoofedLocation = [[CLLocation alloc] initWithCoordinate:baseCoordinate
-                                                                   altitude:originalLocation.altitude
-                                                         horizontalAccuracy:self.accuracyValue
-                                                           verticalAccuracy:originalLocation.verticalAccuracy
-                                                                  timestamp:[NSDate date]];
-        
-        return spoofedLocation;
+
+        PXLocationSampleInput *input = [[PXLocationSampleInput alloc] init];
+        input.latitude = safeLatitude;
+        input.longitude = safeLongitude;
+        PXBeginLocationSourceRead();
+        @try {
+            input.altitude = originalLocation.altitude;
+            input.desiredHorizontalAccuracy = self.accuracyValue > 0.0
+                ? self.accuracyValue
+                : originalLocation.horizontalAccuracy;
+            input.driftRadiusMeters = self.positionVariationsEnabled && self.jitterEnabled
+                ? self.jitterAmount
+                : 0.0;
+            input.requestedSpeed = self.lastReportedSpeed > 0.0
+                ? self.lastReportedSpeed
+                : self.maxMovementSpeed;
+            input.movementMode = (PXLocationMovementMode)self.transportationMode;
+            if (self.isMovingAlongPath && self.pathLocations.count > 1) {
+                NSUInteger endIndex = MIN((NSUInteger)MAX(0, self.currentPathIndex),
+                                          self.pathLocations.count - 1);
+                NSUInteger startIndex = endIndex > 0 ? endIndex - 1 : 0;
+                CLLocationCoordinate2D start = self.pathLocations[startIndex].coordinate;
+                CLLocationCoordinate2D end = self.pathLocations[endIndex].coordinate;
+                input.segmentStart = [[PXLocationPoint alloc] initWithLatitude:start.latitude
+                                                                     longitude:start.longitude];
+                input.segmentEnd = [[PXLocationPoint alloc] initWithLatitude:end.latitude
+                                                                   longitude:end.longitude];
+            } else if (self.externalRouteSegment) {
+                NSDictionary *start = self.externalRouteSegment[@"start"];
+                NSDictionary *end = self.externalRouteSegment[@"end"];
+                input.segmentStart = [[PXLocationPoint alloc]
+                    initWithLatitude:[start[@"latitude"] doubleValue]
+                    longitude:[start[@"longitude"] doubleValue]];
+                input.segmentEnd = [[PXLocationPoint alloc]
+                    initWithLatitude:[end[@"latitude"] doubleValue]
+                    longitude:[end[@"longitude"] doubleValue]];
+                input.requestedSpeed = [self.externalRouteSegment[@"speed"] doubleValue];
+                input.movementMode = (PXLocationMovementMode)
+                    [self.externalRouteSegment[@"mode"] integerValue];
+            }
+            NSDate *now = [NSDate date];
+            PXLocationSample *sample = [session nextLocationSampleForInput:input
+                                                           sourceTimestamp:originalLocation.timestamp
+                                                                       now:now];
+            if (!sample) {
+                return originalLocation;
+            }
+            self.lastReportedSpeed = sample.speed;
+            self.lastReportedCourse = sample.course;
+            return PXLocationFromSample(sample);
+        } @finally {
+            PXEndLocationSourceRead();
+        }
     }
+}
+
+- (CLHeading *)modifySpoofedHeading:(CLHeading *)originalHeading
+            orientationOffsetDegrees:(double)orientationOffsetDegrees {
+    if (!originalHeading) {
+        return originalHeading;
+    }
+    @synchronized(self) {
+        if (![self isSpoofingEnabled]) {
+            [self.locationSessionCache invalidate];
+            return originalHeading;
+        }
+        if (PXHeadingSampleForHeading(originalHeading)) {
+            return originalHeading;
+        }
+        PXProfileManifest *manifest = [self activeLocationManifest];
+        PXLocationSession *session = [self.locationSessionCache
+            sessionForGenerationID:manifest.generationID
+            seed:manifest.seed];
+        if (!session) {
+            return originalHeading;
+        }
+        if (!session.currentLocationSample) {
+            CLLocation *source = [[CLLocation alloc]
+                initWithCoordinate:CLLocationCoordinate2DMake(self.latitude, self.longitude)
+                altitude:0.0
+                horizontalAccuracy:self.accuracyValue
+                verticalAccuracy:self.accuracyValue * 1.25
+                course:-1.0
+                speed:0.0
+                timestamp:originalHeading.timestamp];
+            [self modifySpoofedLocation:source];
+        }
+        PXBeginLocationSourceRead();
+        @try {
+            PXHeadingSample *sample = [session
+                nextHeadingSampleWithSourceTimestamp:originalHeading.timestamp
+                now:[NSDate date]
+                orientationOffsetDegrees:orientationOffsetDegrees];
+            return sample ? PXSyntheticHeadingFromSample(sample, originalHeading) : originalHeading;
+        } @finally {
+            PXEndLocationSourceRead();
+        }
+    }
+}
+
+- (CLLocation *)currentVirtualLocation {
+    @synchronized(self) {
+        PXLocationSample *sample = self.locationSessionCache.currentSession.currentLocationSample;
+        return sample ? PXLocationFromSample(sample) : nil;
+    }
+}
+
+- (CLHeading *)currentVirtualHeadingWithSource:(CLHeading *)sourceHeading {
+    @synchronized(self) {
+        PXHeadingSample *sample = self.locationSessionCache.currentSession.currentHeadingSample;
+        return sample ? PXSyntheticHeadingFromSample(sample, sourceHeading) : nil;
+    }
+}
+
+- (PXProfileManifest *)activeLocationManifest {
+    if (self.cachedLocationManifest) {
+        return self.cachedLocationManifest;
+    }
+    NSDictionary *profileInfo = [NSDictionary dictionaryWithContentsOfFile:PXCurrentProfileInfoPath()];
+    NSString *profileID = [profileInfo[@"ProfileId"] isKindOfClass:[NSString class]]
+        ? profileInfo[@"ProfileId"]
+        : nil;
+    if (profileID.length == 0 || ![profileID isEqualToString:profileID.lastPathComponent]) {
+        return nil;
+    }
+    NSString *identityDirectory = PXProfileIdentityDirectoryPath(profileID);
+    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
+    PXProfileManifest *manifest = [store activeManifestWithError:nil];
+    self.cachedLocationManifest = manifest;
+    return manifest;
+}
+
+- (void)invalidateVirtualLocationSession {
+    @synchronized(self) {
+        self.cachedLocationManifest = nil;
+        [self.locationSessionCache invalidate];
+    }
+}
+
+- (void)reloadVirtualLocationConfigurationInvalidatingSession:(BOOL)invalidateSession {
+    @synchronized(self) {
+        self.cachedPinnedLocation = nil;
+        self.lastPinnedLocationReadTime = 0;
+        self.spoofingToggleState = [self loadSpoofingToggleState];
+        NSDictionary *pinnedLocation = self.spoofingToggleState
+            ? [self directReadPinnedLocationFromFile]
+            : nil;
+        self.spoofingEnabled = pinnedLocation != nil;
+        NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:[self spoofingPlistPath]];
+        NSDictionary *routeSegment = [settings[@"ActiveRouteSegment"] isKindOfClass:[NSDictionary class]]
+            ? settings[@"ActiveRouteSegment"]
+            : nil;
+        NSDictionary *start = [routeSegment[@"start"] isKindOfClass:[NSDictionary class]]
+            ? routeSegment[@"start"]
+            : nil;
+        NSDictionary *end = [routeSegment[@"end"] isKindOfClass:[NSDictionary class]]
+            ? routeSegment[@"end"]
+            : nil;
+        CLLocationCoordinate2D startCoordinate = CLLocationCoordinate2DMake(
+            [start[@"latitude"] doubleValue],
+            [start[@"longitude"] doubleValue]
+        );
+        CLLocationCoordinate2D endCoordinate = CLLocationCoordinate2DMake(
+            [end[@"latitude"] doubleValue],
+            [end[@"longitude"] doubleValue]
+        );
+        NSInteger routeMode = [routeSegment[@"mode"] integerValue];
+        double routeSpeed = [routeSegment[@"speed"] doubleValue];
+        BOOL routeIsValid = routeSegment && start && end &&
+            CLLocationCoordinate2DIsValid(startCoordinate) &&
+            CLLocationCoordinate2DIsValid(endCoordinate) &&
+            (startCoordinate.latitude != endCoordinate.latitude ||
+             startCoordinate.longitude != endCoordinate.longitude) &&
+            (routeMode == TransportationModeWalking || routeMode == TransportationModeDriving) &&
+            isfinite(routeSpeed) && routeSpeed > 0.0;
+        self.externalRouteSegment = routeIsValid ? [routeSegment copy] : nil;
+        if (pinnedLocation) {
+            self.latitude = [pinnedLocation[@"latitude"] doubleValue];
+            self.longitude = [pinnedLocation[@"longitude"] doubleValue];
+        } else {
+            self.latitude = 0.0;
+            self.longitude = 0.0;
+        }
+        if (invalidateSession) {
+            self.cachedLocationManifest = nil;
+            [self.locationSessionCache invalidate];
+        }
+    }
+}
+
+- (void)refreshVirtualLocationConfiguration {
+    [self reloadVirtualLocationConfigurationInvalidatingSession:YES];
+}
+
+- (void)refreshVirtualRouteContext {
+    [self reloadVirtualLocationConfigurationInvalidatingSession:NO];
+}
+
+- (void)publishCurrentPathPosition:(CLLocation *)currentPosition
+                       segmentStart:(CLLocation *)segmentStart
+                         segmentEnd:(CLLocation *)segmentEnd {
+    if (!currentPosition || !segmentStart || !segmentEnd) {
+        return;
+    }
+    NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:
+        [self spoofingPlistPath]] ?: [NSMutableDictionary dictionary];
+    CLLocationCoordinate2D position = currentPosition.coordinate;
+    CLLocationCoordinate2D start = segmentStart.coordinate;
+    CLLocationCoordinate2D end = segmentEnd.coordinate;
+    settings[@"PinnedLocation"] = @{
+        @"latitude": @(position.latitude),
+        @"longitude": @(position.longitude)
+    };
+    settings[@"ActiveRouteSegment"] = @{
+        @"start": @{@"latitude": @(start.latitude), @"longitude": @(start.longitude)},
+        @"end": @{@"latitude": @(end.latitude), @"longitude": @(end.longitude)},
+        @"speed": @(MAX(0.0, currentPosition.speed)),
+        @"mode": @(self.transportationMode)
+    };
+    if (![settings writeToFile:[self spoofingPlistPath] atomically:YES]) {
+        PXLog(@"[WeaponX] Failed to publish active route context");
+        return;
+    }
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         CFSTR("com.hydra.projectx.locationRouteUpdated"),
+                                         NULL,
+                                         NULL,
+                                         YES);
+}
+
+- (void)clearPublishedPathContext {
+    NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:
+        [self spoofingPlistPath]];
+    if (!settings[@"ActiveRouteSegment"]) {
+        return;
+    }
+    [settings removeObjectForKey:@"ActiveRouteSegment"];
+    if (![settings writeToFile:[self spoofingPlistPath] atomically:YES]) {
+        PXLog(@"[WeaponX] Failed to clear active route context");
+        return;
+    }
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         CFSTR("com.hydra.projectx.locationRouteUpdated"),
+                                         NULL,
+                                         NULL,
+                                         YES);
+}
+
+- (void)publishVirtualLocationConfigurationChanged {
+    [self invalidateVirtualLocationSession];
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         CFSTR("com.hydra.projectx.locationChanged"),
+                                         NULL,
+                                         NULL,
+                                         YES);
 }
 
 - (double)getSpoofedLatitude {
@@ -868,6 +1037,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
     
     // Save toggle state to plist
     [self saveSpoofingToggleState:YES];
+    [self publishVirtualLocationConfigurationChanged];
 }
 
 - (void)disableSpoofingToggle {
@@ -878,6 +1048,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
     
     // Save toggle state to plist
     [self saveSpoofingToggleState:NO];
+    [self publishVirtualLocationConfigurationChanged];
     
     PXLog(@"[WeaponX] GPS Spoofing Toggle turned OFF");
 }
@@ -1408,6 +1579,18 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         // Store reported speed and course
         _lastReportedSpeed = currentLoc.speed;
         _lastReportedCourse = currentLoc.course;
+
+        CLLocation *segmentStart = currentLoc;
+        CLLocation *segmentEnd = nil;
+        if (_currentPathIndex + 1 < self.pathLocations.count) {
+            segmentEnd = self.pathLocations[_currentPathIndex + 1];
+        } else if (_currentPathIndex > 0) {
+            segmentStart = self.pathLocations[_currentPathIndex - 1];
+            segmentEnd = currentLoc;
+        }
+        [self publishCurrentPathPosition:currentLoc
+                            segmentStart:segmentStart
+                              segmentEnd:segmentEnd];
         
         // Notify about location update
         [[NSNotificationCenter defaultCenter] postNotificationName:@"com.weaponx.locationUpdated" 
@@ -1453,6 +1636,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         self.isMovingAlongPath = NO;
         // Do NOT clear currentPath or currentPathIndex here; let controller handle clearing if needed
         self.pathLocations = nil;
+        [self clearPublishedPathContext];
         
         // Don't call completion handler when manually stopped
         self.pathCompletionHandler = nil;

@@ -21,8 +21,12 @@
 - (instancetype)init {
     if (self = [super init]) {
         // Initialize the iOS version, build number, Darwin kernel and XNU version pairs
-        // Starting from iOS 16.2 and above only
         _versionBuildPairs = @[
+            // Latest iOS 15 release for the iPhone 7 family.
+            @{@"version": @"15.8.8", @"build": @"19H422",
+              @"kernel_version": @"Darwin Kernel Version 21.6.0: Fri Mar  6 20:59:07 PST 2026; root:xnu-8020.241.44~1/RELEASE_ARM64_T8010",
+              @"darwin": @"21.6.0", @"xnu": @"8020.241.44~1"},
+
             // iOS 16.x versions (starting from 16.2)
             @{@"version": @"16.2", @"build": @"20C65", 
               @"kernel_version": @"Darwin Kernel Version 22.2.0: Mon Nov 28 20:10:47 PST 2022; root:xnu-8792.72.6~1/RELEASE_ARM64_T8101", 

@@ -4,3 +4,13 @@
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# ProjectX deployment config, state, repository, and logs are local-only.
+.deploy/
+
+# Local build products and macOS metadata are not source artifacts.
+.theos/
+packages/*.deb
+.DS_Store
+ProjectX.entitlements.xml
+ent.plist.xml

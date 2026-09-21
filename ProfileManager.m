@@ -1,4 +1,6 @@
 #import "ProfileManager.h"
+#import "ProfileManifest.h"
+#import "PXRootHidePath.h"
 #import <UIKit/UIKit.h>
 #import "ContainerManager.h"
 #import <spawn.h>
@@ -25,16 +27,16 @@
 - (BOOL)isApplicationEnabled:(NSString *)bundleID;
 - (NSDictionary *)getApplicationInfo:(NSString *)bundleID;
 - (void)regenerateAllEnabledIdentifiers;
+- (BOOL)regenerateAllEnabledIdentifiersWithError:(NSError **)error;
+- (BOOL)regenerateProfileAtIdentityDirectory:(NSString *)identityDirectory error:(NSError **)error;
+- (BOOL)regenerateProfileAtIdentityDirectory:(NSString *)identityDirectory publishNotifications:(BOOL)publishNotifications error:(NSError **)error;
+- (void)publishProfileGenerationNotifications;
 - (void)resetCanvasNoise;
 @end
 
 @interface LSApplicationProxy : NSObject
 + (id)applicationProxyForIdentifier:(id)identifier;
 @property(readonly) NSString *bundleExecutable;
-@end
-
-@interface NetworkManager : NSObject
-+ (void)saveLocalIPAddress:(NSString *)localIP;
 @end
 
 @interface ProfileManager ()
@@ -185,13 +187,12 @@
         _mutableProfiles = [NSMutableArray array];
         _fileManager = [NSFileManager defaultManager];
         
-        // Use the specified jailbreak directory structure
-        _profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        _profilesDirectory = PXProfilesDirectoryPath();
         
         NSLog(@"[WeaponX] 📁 Using profiles directory: %@", _profilesDirectory);
         
         // Create main WeaponX directory if it doesn't exist
-        NSString *weaponXDirectory = @"/var/jb/var/mobile/Library/WeaponX";
+        NSString *weaponXDirectory = PXWeaponXDataPath();
         [self createDirectoryIfNeeded:weaponXDirectory];
         
         // Create profiles directory if it doesn't exist
@@ -223,7 +224,7 @@
             [_fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:centralInfoPath error:nil];
             
             // Also write to active_profile_info.plist as a backup/legacy support
-            NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+            NSString *activeInfoPath = PXActiveProfileInfoPath();
             [profileInfo writeToFile:activeInfoPath atomically:YES];
             [_fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:activeInfoPath error:nil];
             
@@ -306,6 +307,10 @@
 }
 
 #pragma mark - Public Methods
+
+- (NSString *)profileDirectoryForProfile:(Profile *)profile {
+    return [self.profilesDirectory stringByAppendingPathComponent:profile.profileId];
+}
 
 - (void)createProfile:(Profile *)profile completion:(void (^)(BOOL success, NSError * _Nullable error))completion {
     NSLog(@"[WeaponX] 📝 Creating new profile: %@", profile.name);
@@ -398,167 +403,32 @@
     // Terminate all enabled scoped apps before setting as current profile
     [self terminateEnabledScopedApps];
     
-    // Set as current profile
+    Profile *previousCurrentProfile = self.mutableCurrentProfile;
+
+    NSError *generationError = nil;
+    IdentifierManager *identifierManager = [IdentifierManager sharedManager];
+    NSLog(@"[WeaponX] 🔄 Generating atomic Profile identity for new profile: %@", profile.name);
+    if (![identifierManager regenerateProfileAtIdentityDirectory:identityDir
+                                            publishNotifications:NO
+                                                           error:&generationError]) {
+        [self.mutableProfiles removeObject:profile];
+        NSError *cleanupError = nil;
+        if (![self.fileManager removeItemAtPath:profileDir error:&cleanupError] && cleanupError) {
+            NSLog(@"[WeaponX] ⚠️ Failed to clean up incomplete profile directory: %@", cleanupError);
+        }
+        NSLog(@"[WeaponX] ❌ Failed to generate Profile identity: %@", generationError.localizedDescription);
+        if (completion) completion(NO, generationError);
+        return;
+    }
+
     self.mutableCurrentProfile = profile;
-    
-    // Update central store with new profile
     [self updateCurrentProfileInfoWithProfile:profile];
-    
-    // Randomize app versions for the new profile
     [self randomizeAppVersionsForProfile:profile.profileId];
-    
-    // Generate identifiers for the new profile
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // 1. Generate WiFi information using WiFiManager
-        SEL sharedManagerSel = NSSelectorFromString(@"sharedManager");
-        Class wifiManagerClass = NSClassFromString(@"WiFiManager");
-        
-        if (wifiManagerClass && [wifiManagerClass respondsToSelector:sharedManagerSel]) {
-            // Use NSInvocation to safely call the method
-            NSMethodSignature *signature = [wifiManagerClass methodSignatureForSelector:sharedManagerSel];
-            if (signature) {
-                NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-                [invocation setTarget:wifiManagerClass];
-                [invocation setSelector:sharedManagerSel];
-                [invocation invoke];
-                
-                // Get the result
-                id __unsafe_unretained wifiManager;
-                [invocation getReturnValue:&wifiManager];
-                
-                if (wifiManager) {
-                    SEL generateWiFiInfoSel = NSSelectorFromString(@"generateWiFiInfo");
-                    if ([wifiManager respondsToSelector:generateWiFiInfoSel]) {
-                        NSLog(@"[WeaponX] 📶 Generating WiFi info for profile: %@", profile.name);
-                        
-                        // Use NSInvocation to safely call the method
-                        NSMethodSignature *genSig = [wifiManager methodSignatureForSelector:generateWiFiInfoSel];
-                        NSInvocation *genInvocation = [NSInvocation invocationWithMethodSignature:genSig];
-                        [genInvocation setTarget:wifiManager];
-                        [genInvocation setSelector:generateWiFiInfoSel];
-                        [genInvocation invoke];
-                    }
-                }
-            }
-        }
-        
-        // 2. Generate local IP and carrier info based on connection type
-        NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
-        NSInteger connectionType = [securitySettings integerForKey:@"networkConnectionType"];
-        
-        // Path to profile identity directory
-        NSString *identityDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@/identity", profile.profileId];
-        
-        // Check if directory exists, create if not
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        if (![fileManager fileExistsAtPath:identityDir]) {
-            [fileManager createDirectoryAtPath:identityDir withIntermediateDirectories:YES attributes:nil error:nil];
-        }
-        
-        // Generate carrier info if in cellular (2) or auto (0) mode
-        if (connectionType == 0 || connectionType == 2) {
-            NSString *countryCode = [securitySettings stringForKey:@"networkISOCountryCode"] ?: @"us";
-            
-            // Get proper carrier info from NetworkManager using NSInvocation
-            Class networkManagerClass = NSClassFromString(@"NetworkManager");
-            SEL randomCarrierSel = NSSelectorFromString(@"getRandomCarrierForCountry:");
-            
-            if ([networkManagerClass respondsToSelector:randomCarrierSel]) {
-                // Use NSInvocation to safely call the class method
-                NSMethodSignature *signature = [networkManagerClass methodSignatureForSelector:randomCarrierSel];
-                if (signature) {
-                    NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-                    [invocation setTarget:networkManagerClass];
-                    [invocation setSelector:randomCarrierSel];
-                    [invocation setArgument:&countryCode atIndex:2]; // Arguments start at index 2 (0:self, 1:_cmd)
-                    [invocation invoke];
-                    
-                    // Get the return value
-                    NSDictionary * __unsafe_unretained carrierInfo;
-                    [invocation getReturnValue:&carrierInfo];
-                    
-                    if (carrierInfo) {
-                    // Create carrier_details.plist
-                    NSDictionary *carrierDict = @{
-                        @"carrierName": carrierInfo[@"name"] ?: @"",
-                        @"mcc": carrierInfo[@"mcc"] ?: @"",
-                        @"mnc": carrierInfo[@"mnc"] ?: @"",
-                        @"lastUpdated": [NSDate date]
-                    };
-                    
-                    NSString *carrierPath = [identityDir stringByAppendingPathComponent:@"carrier_details.plist"];
-                    [carrierDict writeToFile:carrierPath atomically:YES];
-                    
-                    // Also update the network_settings.plist
-                    NSString *networkPath = [identityDir stringByAppendingPathComponent:@"network_settings.plist"];
-                    NSMutableDictionary *networkDict = [NSMutableDictionary dictionaryWithContentsOfFile:networkPath] ?: 
-                                                    [NSMutableDictionary dictionary];
-                    networkDict[@"carrierName"] = carrierInfo[@"name"];
-                    networkDict[@"mcc"] = carrierInfo[@"mcc"];
-                    networkDict[@"mnc"] = carrierInfo[@"mnc"];
-                    networkDict[@"lastUpdated"] = [NSDate date];
-                    [networkDict writeToFile:networkPath atomically:YES];
-                    
-                    // Also update the device_ids.plist
-                    NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-                    NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                                    [NSMutableDictionary dictionary];
-                    deviceIds[@"CarrierName"] = carrierInfo[@"name"];
-                    deviceIds[@"CarrierMCC"] = carrierInfo[@"mcc"];
-                    deviceIds[@"CarrierMNC"] = carrierInfo[@"mnc"];
-                    [deviceIds writeToFile:deviceIdsPath atomically:YES];
-                    
-                    NSLog(@"[WeaponX] 📱 Generated carrier info for profile %@: %@ (%@-%@)", 
-                        profile.name, carrierInfo[@"name"], carrierInfo[@"mcc"], carrierInfo[@"mnc"]);
-                }
-                }
-            }
-        }
-        
-        // Generate local IP if in WiFi (1), auto (0), or cellular (2) mode
-        if (connectionType == 0 || connectionType == 1 || connectionType == 2) {
-            // Generate local IP using NSInvocation
-            Class networkManagerClass = NSClassFromString(@"NetworkManager");
-            SEL spoofedIPSel = NSSelectorFromString(@"generateSpoofedLocalIPAddressFromCurrent");
-            if ([networkManagerClass respondsToSelector:spoofedIPSel]) {
-                NSMethodSignature *signature = [networkManagerClass methodSignatureForSelector:spoofedIPSel];
-                if (signature) {
-                    NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-                    [invocation setTarget:networkManagerClass];
-                    [invocation setSelector:spoofedIPSel];
-                    [invocation invoke];
-                    NSString * __unsafe_unretained localIP;
-                    [invocation getReturnValue:&localIP];
-                // Save to network_settings.plist
-                NSString *networkPath = [identityDir stringByAppendingPathComponent:@"network_settings.plist"];
-                    NSMutableDictionary *networkDict = [NSMutableDictionary dictionaryWithContentsOfFile:networkPath] ?: [NSMutableDictionary dictionary];
-                networkDict[@"localIPAddress"] = localIP;
-                // Also update the device_ids.plist
-                NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-                NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: [NSMutableDictionary dictionary];
-                deviceIds[@"LocalIPAddress"] = localIP;
-                [deviceIds writeToFile:deviceIdsPath atomically:YES];
-                    NSLog(@"[WeaponX] 🌐 Generated spoofed local IP for profile %@: %@", profile.name, localIP);
-                    // --- FIX: Also save IPv6 using NetworkManager logic ---
-                    [NetworkManager saveLocalIPAddress:localIP];
-                }
-                }
-        }
-        
-        // 3. Get the IdentifierManager for other identifiers
-        Class identifierManagerClass = NSClassFromString(@"IdentifierManager");
-        if (identifierManagerClass) {
-            id identifierManager = [identifierManagerClass sharedManager];
-            if (identifierManager && [identifierManager respondsToSelector:@selector(regenerateAllEnabledIdentifiers)]) {
-                NSLog(@"[WeaponX] 🔄 Generating identifiers for new profile: %@", profile.name);
-                [identifierManager regenerateAllEnabledIdentifiers];
-            }
-        }
-    });
     
     // Save to disk
     [self saveProfilesWithCompletion:^(BOOL success, NSError * _Nullable error) {
         if (success) {
+            [identifierManager publishProfileGenerationNotifications];
             NSLog(@"[WeaponX] ✅ Profile created successfully: %@ (created at: %@)", profile.name, profile.createdAt);
             // Reset canvas fingerprint noise for new profile
             Class identifierManagerClass = NSClassFromString(@"IdentifierManager");
@@ -575,6 +445,15 @@
             });
         } else {
             NSLog(@"[WeaponX] ❌ Failed to save profile: %@", error);
+            [self.mutableProfiles removeObject:profile];
+            self.mutableCurrentProfile = previousCurrentProfile;
+            if (previousCurrentProfile) {
+                [self updateCurrentProfileInfoWithProfile:previousCurrentProfile];
+            }
+            NSError *cleanupError = nil;
+            if (![self.fileManager removeItemAtPath:profileDir error:&cleanupError] && cleanupError) {
+                NSLog(@"[WeaponX] ⚠️ Failed to clean up unsaved profile directory: %@", cleanupError);
+            }
         }
         if (completion) completion(success, error);
     }];
@@ -799,6 +678,16 @@
 
 - (void)switchToProfile:(Profile *)profile completion:(void (^)(BOOL success, NSError * _Nullable error))completion {
     NSLog(@"[WeaponX] 🔄 Switching to profile: %@", profile.name);
+
+    NSString *targetIdentityDirectory = [[self.profilesDirectory stringByAppendingPathComponent:profile.profileId]
+        stringByAppendingPathComponent:@"identity"];
+    NSError *migrationError = nil;
+    PXProfileStore *targetStore = [[PXProfileStore alloc] initWithIdentityDirectory:targetIdentityDirectory];
+    if (![targetStore migrateLegacyProfileIfNeededWithError:&migrationError]) {
+        NSLog(@"[WeaponX] ❌ Failed to migrate legacy Profile %@: %@", profile.name, migrationError.localizedDescription);
+        if (completion) completion(NO, migrationError);
+        return;
+    }
     
     // Don't switch to the same profile
     if ([self.mutableCurrentProfile.profileId isEqualToString:profile.profileId]) {
@@ -860,22 +749,8 @@
 - (void)randomizeAppVersionsForProfile:(NSString *)profileId {
     NSLog(@"[WeaponX] 🎲 Randomizing app versions for profile: %@", profileId);
     
-    // Try rootless path first for multi-version data
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+    NSString *prefsPath = PXPreferencesDirectoryPath();
     NSString *multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
-    
-    // Fallback to standard path if rootless path doesn't exist
-    if (![self.fileManager fileExistsAtPath:prefsPath]) {
-        // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
-        multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
-        
-        // Fallback to standard path if needed
-        if (![self.fileManager fileExistsAtPath:prefsPath]) {
-            prefsPath = @"/var/mobile/Library/Preferences";
-            multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
-        }
-    }
     
     // Load multi-version data
     NSDictionary *multiVersionDict = [NSDictionary dictionaryWithContentsOfFile:multiVersionFile];
@@ -890,7 +765,7 @@
     NSDictionary *scopedAppsInfo = [self loadScopedAppsInfo];
     
     // Create app_versions directory in the profile directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = PXProfileDirectoryPath(profileId);
     NSString *appVersionsDir = [profileDir stringByAppendingPathComponent:@"app_versions"];
     
     if (![self.fileManager fileExistsAtPath:appVersionsDir]) {
@@ -953,22 +828,7 @@
 }
 
 - (NSDictionary *)loadScopedAppsInfo {
-    // Try to load scoped apps info from global scope file
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
-    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-    
-    // Fallback to standard path if rootless path doesn't exist
-    if (![self.fileManager fileExistsAtPath:prefsPath]) {
-        // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
-        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        
-        // Fallback to standard path if needed
-        if (![self.fileManager fileExistsAtPath:prefsPath]) {
-            prefsPath = @"/var/mobile/Library/Preferences";
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        }
-    }
+    NSString *scopedAppsFile = PXGlobalScopePreferencesPath();
     
     // Load scoped apps
     NSDictionary *scopedAppsDict = [NSDictionary dictionaryWithContentsOfFile:scopedAppsFile];
@@ -1085,7 +945,7 @@
         NSMutableArray *existingIDs = [NSMutableArray array];
         
         // Get profiles directory path
-        NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesDirectory = PXProfilesDirectoryPath();
         
         // Get file manager
         NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -1299,7 +1159,7 @@
 }
 
 - (void)saveSettings:(NSDictionary *)settings {
-    NSString *settingsPath = [@"/var/jb/var/mobile/Library/WeaponX" stringByAppendingPathComponent:@"settings.plist"];
+    NSString *settingsPath = [PXWeaponXDataPath() stringByAppendingPathComponent:@"settings.plist"];
     
     BOOL success = [settings writeToFile:settingsPath atomically:YES];
     if (success) {
@@ -1374,7 +1234,7 @@
 #pragma mark - Current Profile Central Management
 
 - (NSString *)centralProfileInfoPath {
-    return [self.profilesDirectory stringByAppendingPathComponent:@"current_profile_info.plist"];
+    return PXCurrentProfileInfoPath();
 }
 
 - (BOOL)saveCentralProfileInfo:(NSDictionary *)infoDict {
@@ -1527,7 +1387,7 @@
     [self updateCurrentProfileInfoWithProfile:defaultProfile];
     
     // Also write directly to active_profile_info.plist as a backup
-    NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+    NSString *activeInfoPath = PXActiveProfileInfoPath();
     NSDictionary *activeInfo = @{
         @"ProfileId": @"0",
         @"ProfileName": defaultProfile.name,
@@ -1598,4 +1458,4 @@
     NSLog(@"[WeaponX] ✅ Immediately created profile '0' directory structure");
 }
 
-@end 
+@end

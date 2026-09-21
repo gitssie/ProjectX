@@ -1,6 +1,7 @@
 #import "BottomButtons.h"
 #import "ProjectX.h"
 #import "IdentifierManager.h"
+#import "PXRootHidePath.h"
 #import <spawn.h>
 #import <sys/wait.h>
 #import <objc/runtime.h>
@@ -56,12 +57,7 @@
         pid_t pid;
         int status;
         
-        // Check for different killall paths based on jailbreak type
-        NSArray *killallPaths = @[
-            @"/var/jb/usr/bin/killall",  // Dopamine path
-            @"/usr/bin/killall",         // Traditional/Palera1n path
-            @"/var/jb/bin/killall"       // Alternative Dopamine path
-        ];
+        NSArray *killallPaths = @[PXBootstrapCommandPath(@"killall")];
         
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *killallPath = nil;
@@ -122,12 +118,7 @@
         pid_t pid;
         int status;
         
-        // Check for different pidof paths based on jailbreak type
-        NSArray *pidofPaths = @[
-            @"/var/jb/usr/bin/pidof",    // Dopamine path
-            @"/usr/bin/pidof",           // Traditional/Palera1n path
-            @"/var/jb/bin/pidof"         // Alternative Dopamine path
-        ];
+        NSArray *pidofPaths = @[PXBootstrapCommandPath(@"pidof")];
         
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *pidofPath = nil;
@@ -332,13 +323,7 @@
 - (void)respringUsingKillall {
     NSLog(@"[BottomButtons] 🔄 Attempting respring using killall");
     
-    // Check for different killall paths based on jailbreak type
-    NSArray *killallPaths = @[
-        @"/var/jb/usr/bin/killall",   // Dopamine path
-        @"/usr/bin/killall",          // Traditional/Palera1n path
-        @"/var/jb/bin/killall",       // Alternative Dopamine path
-        @"/private/preboot/jb/usr/bin/killall"  // Additional Palera1n path
-    ];
+    NSArray *killallPaths = @[PXBootstrapCommandPath(@"killall")];
     
     NSFileManager *fileManager = [NSFileManager defaultManager];
     NSString *killallPath = nil;
@@ -378,13 +363,7 @@
 - (void)respringUsingSbreload {
     NSLog(@"[BottomButtons] 🔄 Attempting respring using sbreload");
     
-    // Check for different sbreload paths based on jailbreak type
-    NSArray *sbreloadPaths = @[
-        @"/var/jb/usr/bin/sbreload",   // Dopamine path
-        @"/usr/bin/sbreload",          // Traditional/Palera1n path
-        @"/var/jb/bin/sbreload",       // Alternative path
-        @"/private/preboot/jb/usr/bin/sbreload"  // Additional Palera1n path
-    ];
+    NSArray *sbreloadPaths = @[PXBootstrapCommandPath(@"sbreload")];
     
     NSFileManager *fileManager = [NSFileManager defaultManager];
     NSString *sbreloadPath = nil;
@@ -431,13 +410,7 @@
 - (void)respringUsingLdrestart {
     NSLog(@"[BottomButtons] 🔄 Attempting respring using ldrestart");
     
-    // Check for different ldrestart paths based on jailbreak type
-    NSArray *ldrestartPaths = @[
-        @"/var/jb/usr/bin/ldrestart",   // Dopamine path
-        @"/usr/bin/ldrestart",          // Traditional/Palera1n path
-        @"/var/jb/bin/ldrestart",       // Alternative path
-        @"/private/preboot/jb/usr/bin/ldrestart"  // Additional Palera1n path
-    ];
+    NSArray *ldrestartPaths = @[PXBootstrapCommandPath(@"ldrestart")];
     
     NSFileManager *fileManager = [NSFileManager defaultManager];
     NSString *ldrestartPath = nil;

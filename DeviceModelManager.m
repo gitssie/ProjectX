@@ -1,7 +1,7 @@
 #import "DeviceModelManager.h"
 #import "ProjectXLogging.h"
 #import <Security/Security.h>
-#import <UIKit/UIKit.h>
+#import <sys/utsname.h>
 
 @interface DeviceModelManager ()
 @property (nonatomic, strong) NSString *currentIdentifier;
@@ -24,7 +24,27 @@
     // Build a comprehensive database of device specifications
     NSMutableDictionary *specs = [NSMutableDictionary dictionary];
     
-    // iPhone models from iPhone 8 Plus to iPhone 15 Pro Max
+    // iPhone models supported by the iOS 15+ baseline.
+    [self addSpecsForDevice:@"iPhone9,1" name:@"iPhone 7"
+                  resolution:@"1334x750" viewportResolution:@"1334x750"
+              devicePixelRatio:2.0 screenDensity:326
+                cpuArchitecture:@"Apple A10 Fusion" toDict:specs];
+
+    [self addSpecsForDevice:@"iPhone9,2" name:@"iPhone 7 Plus"
+                  resolution:@"1920x1080" viewportResolution:@"2208x1242"
+              devicePixelRatio:3.0 screenDensity:401
+                cpuArchitecture:@"Apple A10 Fusion" toDict:specs];
+
+    [self addSpecsForDevice:@"iPhone9,3" name:@"iPhone 7"
+                  resolution:@"1334x750" viewportResolution:@"1334x750"
+              devicePixelRatio:2.0 screenDensity:326
+                cpuArchitecture:@"Apple A10 Fusion" toDict:specs];
+
+    [self addSpecsForDevice:@"iPhone9,4" name:@"iPhone 7 Plus"
+                  resolution:@"1920x1080" viewportResolution:@"2208x1242"
+              devicePixelRatio:3.0 screenDensity:401
+                cpuArchitecture:@"Apple A10 Fusion" toDict:specs];
+
     [self addSpecsForDevice:@"iPhone10,2" name:@"iPhone 8 Plus" 
                   resolution:@"1920x1080" viewportResolution:@"2208x1242" 
               devicePixelRatio:3.0 screenDensity:401 
@@ -154,97 +174,6 @@
                   resolution:@"2796x1290" viewportResolution:@"2796x1290" 
               devicePixelRatio:3.0 screenDensity:460 
                 cpuArchitecture:@"Apple A17 Pro" toDict:specs];
-    
-    // iPad models
-    [self addSpecsForDevice:@"iPad7,5" name:@"iPad (6th Gen)" 
-                  resolution:@"2048x1536" viewportResolution:@"2048x1536" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple A10 Fusion" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad7,11" name:@"iPad (7th Gen)" 
-                  resolution:@"2160x1620" viewportResolution:@"2160x1620" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple A10 Fusion" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad11,6" name:@"iPad (8th Gen)" 
-                  resolution:@"2160x1620" viewportResolution:@"2160x1620" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple A12 Bionic" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad12,1" name:@"iPad (9th Gen)" 
-                  resolution:@"2160x1620" viewportResolution:@"2160x1620" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple A13 Bionic" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad13,18" name:@"iPad (10th Gen)" 
-                  resolution:@"2360x1640" viewportResolution:@"2360x1640" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple A14 Bionic" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad11,3" name:@"iPad Air (3rd Gen)" 
-                  resolution:@"2224x1668" viewportResolution:@"2224x1668" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple A12 Bionic" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad13,1" name:@"iPad Air (4th Gen)" 
-                  resolution:@"2360x1640" viewportResolution:@"2360x1640" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple A14 Bionic" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad13,16" name:@"iPad Air (5th Gen)" 
-                  resolution:@"2360x1640" viewportResolution:@"2360x1640" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple M1" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad8,1" name:@"iPad Pro 11\" (1st Gen)" 
-                  resolution:@"2388x1668" viewportResolution:@"2388x1668" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple A12X Bionic" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad8,9" name:@"iPad Pro 11\" (2nd Gen)" 
-                  resolution:@"2388x1668" viewportResolution:@"2388x1668" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple A12Z Bionic" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad13,4" name:@"iPad Pro 11\" (3rd Gen)" 
-                  resolution:@"2388x1668" viewportResolution:@"2388x1668" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple M1" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad14,3" name:@"iPad Pro 11\" (4th Gen)" 
-                  resolution:@"2388x1668" viewportResolution:@"2388x1668" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple M2" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad8,5" name:@"iPad Pro 12.9\" (3rd Gen)" 
-                  resolution:@"2732x2048" viewportResolution:@"2732x2048" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple A12X Bionic" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad8,11" name:@"iPad Pro 12.9\" (4th Gen)" 
-                  resolution:@"2732x2048" viewportResolution:@"2732x2048" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple A12Z Bionic" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad13,8" name:@"iPad Pro 12.9\" (5th Gen)" 
-                  resolution:@"2732x2048" viewportResolution:@"2732x2048" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple M1" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad14,5" name:@"iPad Pro 12.9\" (6th Gen)" 
-                  resolution:@"2732x2048" viewportResolution:@"2732x2048" 
-              devicePixelRatio:2.0 screenDensity:264 
-                cpuArchitecture:@"Apple M2" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad11,1" name:@"iPad Mini (5th Gen)" 
-                  resolution:@"2048x1536" viewportResolution:@"2048x1536" 
-              devicePixelRatio:2.0 screenDensity:326 
-                cpuArchitecture:@"Apple A12 Bionic" toDict:specs];
-    
-    [self addSpecsForDevice:@"iPad14,1" name:@"iPad Mini (6th Gen)" 
-                  resolution:@"2266x1488" viewportResolution:@"2266x1488" 
-              devicePixelRatio:2.0 screenDensity:326 
-                cpuArchitecture:@"Apple A15 Bionic" toDict:specs];
                 
     // Store all specifications
     self.deviceSpecifications = [specs copy];
@@ -258,7 +187,10 @@
            screenDensity:(NSInteger)screenDensity 
          cpuArchitecture:(NSString *)cpuArchitecture 
                  toDict:(NSMutableDictionary *)specs {
-                 
+    if (![modelIdentifier hasPrefix:@"iPhone"]) {
+        return;
+    }
+
     // Add device memory and GPU info based on model
     NSInteger deviceMemory = 0;
     NSString *gpuFamily = @"Unknown";
@@ -272,7 +204,19 @@
     
     // Map device identifiers to Board IDs and hw.model values
     // This follows Apple's internal mapping for different device variants
-    if ([modelIdentifier isEqualToString:@"iPhone10,2"]) { // iPhone 8 Plus
+    if ([modelIdentifier isEqualToString:@"iPhone9,1"]) { // iPhone 7
+        boardID = @"D10AP";
+        hwModel = @"D10AP";
+    } else if ([modelIdentifier isEqualToString:@"iPhone9,2"]) { // iPhone 7 Plus
+        boardID = @"D11AP";
+        hwModel = @"D11AP";
+    } else if ([modelIdentifier isEqualToString:@"iPhone9,3"]) { // iPhone 7
+        boardID = @"D101AP";
+        hwModel = @"D101AP";
+    } else if ([modelIdentifier isEqualToString:@"iPhone9,4"]) { // iPhone 7 Plus
+        boardID = @"D111AP";
+        hwModel = @"D111AP";
+    } else if ([modelIdentifier isEqualToString:@"iPhone10,2"]) { // iPhone 8 Plus
         boardID = @"D211AP";
         hwModel = @"D211AP";
     } else if ([modelIdentifier isEqualToString:@"iPhone10,3"]) { // iPhone X
@@ -351,65 +295,25 @@
         boardID = @"D84AP";
         hwModel = @"D84AP";
     }
-    // iPad Board IDs
-    else if ([modelIdentifier isEqualToString:@"iPad7,5"]) { // iPad 6th Gen
-        boardID = @"J71bAP";
-        hwModel = @"J71bAP";
-    } else if ([modelIdentifier isEqualToString:@"iPad7,11"]) { // iPad 7th Gen
-        boardID = @"J171AP";
-        hwModel = @"J171AP";
-    } else if ([modelIdentifier isEqualToString:@"iPad11,6"]) { // iPad 8th Gen
-        boardID = @"J171aAP";
-        hwModel = @"J171aAP";
-    } else if ([modelIdentifier isEqualToString:@"iPad12,1"]) { // iPad 9th Gen
-        boardID = @"J181AP";
-        hwModel = @"J181AP";
-    } else if ([modelIdentifier isEqualToString:@"iPad13,18"]) { // iPad 10th Gen
-        boardID = @"J181fAP";
-        hwModel = @"J181fAP";
-    } else if ([modelIdentifier isEqualToString:@"iPad11,3"]) { // iPad Air 3rd Gen
-        boardID = @"J217AP";
-        hwModel = @"J217AP";
-    } else if ([modelIdentifier isEqualToString:@"iPad13,1"]) { // iPad Air 4th Gen
-        boardID = @"J307AP";
-        hwModel = @"J307AP";
-    } else if ([modelIdentifier isEqualToString:@"iPad13,16"]) { // iPad Air 5th Gen
-        boardID = @"J407AP";
-        hwModel = @"J407AP";
-    } else if ([modelIdentifier isEqualToString:@"iPad8,1"]) { // iPad Pro 11" 1st Gen
-        boardID = @"J317AP";
-        hwModel = @"J317AP";
-    } else if ([modelIdentifier isEqualToString:@"iPad8,9"]) { // iPad Pro 11" 2nd Gen
-        boardID = @"J417AP";
-        hwModel = @"J417AP";
-    } else if ([modelIdentifier isEqualToString:@"iPad13,4"]) { // iPad Pro 11" 3rd Gen
-        boardID = @"J517AP";
-        hwModel = @"J517AP";
-    } else if ([modelIdentifier isEqualToString:@"iPad14,3"]) { // iPad Pro 11" 4th Gen
-        boardID = @"J617AP";
-        hwModel = @"J617AP";
-    } else if ([modelIdentifier isEqualToString:@"iPad8,5"]) { // iPad Pro 12.9" 3rd Gen
-        boardID = @"J320AP";
-        hwModel = @"J320AP";
-    } else if ([modelIdentifier isEqualToString:@"iPad8,11"]) { // iPad Pro 12.9" 4th Gen
-        boardID = @"J420AP";
-        hwModel = @"J420AP";
-    } else if ([modelIdentifier isEqualToString:@"iPad13,8"]) { // iPad Pro 12.9" 5th Gen
-        boardID = @"J522AP";
-        hwModel = @"J522AP";
-    } else if ([modelIdentifier isEqualToString:@"iPad14,5"]) { // iPad Pro 12.9" 6th Gen
-        boardID = @"J620AP";
-        hwModel = @"J620AP";
-    } else if ([modelIdentifier isEqualToString:@"iPad11,1"]) { // iPad Mini 5th Gen
-        boardID = @"J210AP";
-        hwModel = @"J210AP";
-    } else if ([modelIdentifier isEqualToString:@"iPad14,1"]) { // iPad Mini 6th Gen
-        boardID = @"J310AP";
-        hwModel = @"J310AP";
-    }
     
     // Set appropriate memory and GPU values based on model
-    if ([modelIdentifier hasPrefix:@"iPhone10"]) { // iPhone 8 Plus, X
+    if ([modelIdentifier hasPrefix:@"iPhone9"]) { // iPhone 7, 7 Plus
+        deviceMemory = [modelIdentifier isEqualToString:@"iPhone9,2"] ||
+            [modelIdentifier isEqualToString:@"iPhone9,4"] ? 3 : 2;
+        cpuCoreCount = 4;
+        gpuFamily = @"Apple A10 GPU";
+        metalFeatureSet = @"Metal 2.2";
+        webGLInfo = @{
+            @"unmaskedVendor": @"Apple Inc.",
+            @"unmaskedRenderer": @"Apple A10 GPU",
+            @"webglVendor": @"Apple",
+            @"webglRenderer": @"Apple GPU",
+            @"webglVersion": @"WebGL 2.0",
+            @"maxTextureSize": @16384,
+            @"maxRenderBufferSize": @16384
+        };
+    }
+    else if ([modelIdentifier hasPrefix:@"iPhone10"]) { // iPhone 8 Plus, X
         deviceMemory = 3;
         cpuCoreCount = 6; // A11: 2 performance + 4 efficiency cores
         gpuFamily = @"Apple A11 GPU";
@@ -527,71 +431,48 @@
             @"maxRenderBufferSize": @(16384)
         };
     }
-    // iPad models
-    else if ([modelIdentifier hasPrefix:@"iPad"]) {
-        if ([modelIdentifier hasPrefix:@"iPad7"]) { // iPad 6th, 7th gen
-            deviceMemory = 2;
-            cpuCoreCount = 4; // A10: 2 performance + 2 efficiency cores
-            gpuFamily = @"Apple A10 GPU";
-            metalFeatureSet = @"Metal 2.2";
-        } 
-        else if ([modelIdentifier hasPrefix:@"iPad8"]) { // iPad Pro models (3rd, 4th gen)
-            deviceMemory = 4;
-            cpuCoreCount = 8; // A12X/Z: 8 cores
-            gpuFamily = [modelIdentifier hasPrefix:@"iPad8,1"] || [modelIdentifier hasPrefix:@"iPad8,5"] ? @"Apple A12X GPU" : @"Apple A12Z GPU";
-            metalFeatureSet = @"Metal 2.4";
-        }
-        else if ([modelIdentifier hasPrefix:@"iPad11"]) { // iPad 8th gen, iPad Air 3rd gen, iPad Mini 5th gen
-            deviceMemory = 3;
-            cpuCoreCount = 6; // A12: 2 performance + 4 efficiency cores
-            gpuFamily = @"Apple A12 GPU";
-            metalFeatureSet = @"Metal 2.4";
-        }
-        else if ([modelIdentifier hasPrefix:@"iPad12"]) { // iPad 9th gen
-            deviceMemory = 3;
-            cpuCoreCount = 6; // A13: 2 performance + 4 efficiency cores
-            gpuFamily = @"Apple A13 GPU";
-            metalFeatureSet = @"Metal 3.0";
-        }
-        else if ([modelIdentifier hasPrefix:@"iPad13"]) { // iPad 10th gen, iPad Air 4th gen, iPad Pro 11"/12.9" 3rd/5th gen
-            if ([modelIdentifier hasPrefix:@"iPad13,4"] || [modelIdentifier hasPrefix:@"iPad13,8"]) { // M1 iPad Pros
-                deviceMemory = 8;
-                cpuCoreCount = 8; // M1: 4 performance + 4 efficiency cores
-                gpuFamily = @"Apple M1 GPU";
-                metalFeatureSet = @"Metal 3.0";
-            } else { // A14-based iPads
-                deviceMemory = 4;
-                cpuCoreCount = 6; // A14: 2 performance + 4 efficiency cores
-                gpuFamily = @"Apple A14 GPU";
-                metalFeatureSet = @"Metal 3.0";
-            }
-        }
-        else if ([modelIdentifier hasPrefix:@"iPad14"]) { // iPad Mini 6th gen, iPad Pro 11"/12.9" 4th/6th gen
-            if ([modelIdentifier hasPrefix:@"iPad14,3"] || [modelIdentifier hasPrefix:@"iPad14,5"]) { // M2 iPad Pros
-                deviceMemory = 8;
-                cpuCoreCount = 8; // M2: 4 performance + 4 efficiency cores
-                gpuFamily = @"Apple M2 GPU";
-                metalFeatureSet = @"Metal 3.1";
-            } else { // A15-based iPad Mini
-                deviceMemory = 4;
-                cpuCoreCount = 6; // A15: 2 performance + 4 efficiency cores
-                gpuFamily = @"Apple A15 GPU";
-                metalFeatureSet = @"Metal 3.0";
-            }
-        }
-        
-        webGLInfo = @{
-            @"unmaskedVendor": @"Apple Inc.",
-            @"unmaskedRenderer": [gpuFamily copy],
-            @"webglVendor": @"Apple",
-            @"webglRenderer": @"Apple GPU",
-            @"webglVersion": @"WebGL 2.0",
-            @"maxTextureSize": @(16384),
-            @"maxRenderBufferSize": @(16384)
-        };
-    }
     
+    BOOL supports5G = NO;
+    NSRange commaRange = [modelIdentifier rangeOfString:@","];
+    if (commaRange.location != NSNotFound && commaRange.location > @"iPhone".length) {
+        NSString *generation = [modelIdentifier substringWithRange:NSMakeRange(@"iPhone".length,
+                                                                                commaRange.location - @"iPhone".length)];
+        supports5G = generation.integerValue >= 13;
+    }
+
+    NSDictionary<NSString *, NSArray<NSNumber *> *> *storageCapabilities = @{
+        @"iPhone9,1": @[@32, @128, @256], @"iPhone9,2": @[@32, @128, @256],
+        @"iPhone9,3": @[@32, @128, @256], @"iPhone9,4": @[@32, @128, @256],
+        @"iPhone10,2": @[@64, @256], @"iPhone10,3": @[@64, @256],
+        @"iPhone11,8": @[@64, @128, @256], @"iPhone11,2": @[@64, @256, @512],
+        @"iPhone11,6": @[@64, @256, @512], @"iPhone12,1": @[@64, @128, @256],
+        @"iPhone12,3": @[@64, @256, @512], @"iPhone12,5": @[@64, @256, @512],
+        @"iPhone12,8": @[@64, @128, @256], @"iPhone13,1": @[@64, @128, @256],
+        @"iPhone13,2": @[@64, @128, @256], @"iPhone13,3": @[@128, @256, @512],
+        @"iPhone13,4": @[@128, @256, @512], @"iPhone14,4": @[@128, @256, @512],
+        @"iPhone14,5": @[@128, @256, @512], @"iPhone14,2": @[@128, @256, @512, @1024],
+        @"iPhone14,3": @[@128, @256, @512, @1024], @"iPhone14,6": @[@64, @128, @256],
+        @"iPhone14,7": @[@128, @256, @512], @"iPhone14,8": @[@128, @256, @512],
+        @"iPhone15,2": @[@128, @256, @512, @1024], @"iPhone15,3": @[@128, @256, @512, @1024],
+        @"iPhone15,4": @[@128, @256, @512], @"iPhone15,5": @[@128, @256, @512],
+        @"iPhone16,1": @[@128, @256, @512, @1024], @"iPhone16,2": @[@256, @512, @1024]
+    };
+    NSArray<NSNumber *> *supportedStorageCapacities = storageCapabilities[modelIdentifier];
+
+    NSArray<NSNumber *> *supportedIOSMajorVersions = @[@16, @17, @18];
+    if ([modelIdentifier hasPrefix:@"iPhone9"]) {
+        supportedIOSMajorVersions = @[@15];
+    } else if ([modelIdentifier hasPrefix:@"iPhone10"]) {
+        supportedIOSMajorVersions = @[@16];
+    } else if ([modelIdentifier isEqualToString:@"iPhone15,4"] ||
+               [modelIdentifier isEqualToString:@"iPhone15,5"] ||
+               [modelIdentifier hasPrefix:@"iPhone16"]) {
+        supportedIOSMajorVersions = @[@17, @18];
+    }
+
     NSDictionary *deviceSpecs = @{
+        @"identifier": modelIdentifier,
+        @"productType": modelIdentifier,
         @"name": name,
         @"screenResolution": resolution,
         @"viewportResolution": viewportResolution,
@@ -604,7 +485,10 @@
         @"metalFeatureSet": metalFeatureSet,
         @"webGLInfo": webGLInfo ?: @{},
         @"boardID": boardID,
-        @"hwModel": hwModel
+        @"hwModel": hwModel,
+        @"supports5G": @(supports5G),
+        @"supportedStorageCapacities": supportedStorageCapacities,
+        @"supportedIOSMajorVersions": supportedIOSMajorVersions
     };
     
     specs[modelIdentifier] = deviceSpecs;
@@ -661,6 +545,32 @@
 - (NSString *)metalFeatureSetForModel:(NSString *)deviceString {
     NSDictionary *specs = [self deviceSpecificationsForModel:deviceString];
     return specs ? specs[@"metalFeatureSet"] : @"Unknown";
+}
+
+- (BOOL)supports5GForModel:(NSString *)deviceString {
+    NSDictionary *specs = [self deviceSpecificationsForModel:deviceString];
+    return [specs[@"supports5G"] boolValue];
+}
+
+- (NSArray<NSDictionary<NSString *, id> *> *)allDeviceSpecificationRecords {
+    NSMutableArray<NSDictionary<NSString *, id> *> *records = [NSMutableArray array];
+    NSArray<NSString *> *identifiers = [self.deviceSpecifications.allKeys sortedArrayUsingSelector:@selector(compare:)];
+    for (NSString *identifier in identifiers) {
+        [records addObject:self.deviceSpecifications[identifier]];
+    }
+    return [records copy];
+}
+
+- (NSString *)physicalDeviceModelIdentifier {
+    struct utsname systemInfo;
+    if (uname(&systemInfo) != 0) {
+        return @"";
+    }
+    return [NSString stringWithUTF8String:systemInfo.machine] ?: @"";
+}
+
+- (NSDictionary<NSString *, id> *)physicalDeviceSpecificationRecord {
+    return [self deviceSpecificationsForModel:[self physicalDeviceModelIdentifier]];
 }
 
 - (NSDictionary *)webGLInfoForModel:(NSString *)deviceString {
@@ -734,11 +644,6 @@
         if (commaRange.location != NSNotFound) {
             prefix = [cleanedDeviceString substringToIndex:commaRange.location];
         }
-    } else if ([cleanedDeviceString hasPrefix:@"iPad"]) {
-        NSRange commaRange = [cleanedDeviceString rangeOfString:@","];
-        if (commaRange.location != NSNotFound) {
-            prefix = [cleanedDeviceString substringToIndex:commaRange.location];
-        }
     }
     
     // If we have a prefix, look for any model that starts with it
@@ -771,23 +676,13 @@
 
 - (NSString *)generateDeviceModel {
     self.error = nil;
-    
-    // Check if current device is an iPad
-    BOOL isIPad = ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad);
-    
-    // Filter device models by type
-    NSMutableArray *deviceModels = [NSMutableArray array];
-    
-    for (NSString *modelId in self.deviceSpecifications) {
-        BOOL isIPadModel = [modelId hasPrefix:@"iPad"];
-        if ((isIPad && isIPadModel) || (!isIPad && !isIPadModel)) {
-            [deviceModels addObject:modelId];
-        }
-    }
+    NSArray<NSString *> *deviceModels = self.deviceSpecifications.allKeys;
     
     // If no models available (should never happen), return nil
     if (deviceModels.count == 0) {
-        self.error = [NSError errorWithDomain:@"com.weaponx.device" code:1 userInfo:@{NSLocalizedDescriptionKey: @"No device models available for current device type"}];
+        self.error = [NSError errorWithDomain:@"com.weaponx.device"
+                                         code:1
+                                     userInfo:@{NSLocalizedDescriptionKey: @"No iPhone models are available"}];
         return nil;
     }
     
@@ -811,24 +706,9 @@
 - (BOOL)isValidDeviceModel:(NSString *)deviceModel {
     // Basic validation: non-empty, matches known pattern
     if (!deviceModel || deviceModel.length < 6 || deviceModel.length > 20) return NO;
-    
-    // Get current device type
-    BOOL isIPad = ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad);
-    
-    // Check if device model matches current device type
-    BOOL isIPadModel = [deviceModel hasPrefix:@"iPad"];
-    
-    // If device types don't match, validation fails
-    if (isIPad != isIPadModel) return NO;
-    
-    // Regular expression validation based on device type
-    NSString *pattern;
-    if (isIPad) {
-        pattern = @"^iPad[0-9]{1,2},[0-9]{1,2}$";
-    } else {
-        pattern = @"^iPhone[0-9]{1,2},[0-9]{1,2}$";
-    }
-    
+    if (![deviceModel hasPrefix:@"iPhone"]) return NO;
+
+    NSString *pattern = @"^iPhone[0-9]{1,2},[0-9]{1,2}$";
     NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:nil];
     NSUInteger matches = [regex numberOfMatchesInString:deviceModel options:0 range:NSMakeRange(0, deviceModel.length)];
     

@@ -1,20 +1,9 @@
 #!/bin/sh
 
-# Simplified preinst script with Dopamine 2 compatibility
+set -eu
 
-# Detect jailbreak type
-if [ -d "/var/jb" ]; then
-    JBPREFIX="/var/jb"
-elif [ -d "/var/LIB" ]; then
-    JBPREFIX="/var/LIB"
-else
-    JBPREFIX=""
-fi
+# ElleKit consumes tweaks from this logical RootHide package location.
+mkdir -p "/Library/MobileSubstrate/DynamicLibraries"
+chmod 755 "/Library/MobileSubstrate" "/Library/MobileSubstrate/DynamicLibraries"
 
-# Create ElleKit directory if needed
-mkdir -p ${JBPREFIX}/Library/ElleKit/DynamicLibraries 2>/dev/null || true
-
-# For backwards compatibility
-mkdir -p ${JBPREFIX}/Library/MobileSubstrate/DynamicLibraries 2>/dev/null || true
-
-exit 0 
+exit 0

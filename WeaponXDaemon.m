@@ -5,12 +5,12 @@
 #import <fcntl.h>
 #import <unistd.h>
 #import <os/log.h>
+#import "PXRootHidePath.h"
 
 // Constants
 static const int kCheckInterval = 5; // Check every 5 seconds
 static NSString *kGuardianDir = nil; // Will be initialized in init
 static NSString *kProjectXPath = nil; // Will be initialized in init
-static NSString *ROOT_PREFIX = nil; // Will be set based on environment
 static os_log_t weaponx_log = NULL;
 static BOOL debugMode = NO;
 
@@ -39,22 +39,8 @@ extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 - (instancetype)init {
     self = [super init];
     if (self) {
-        // Check for rootless environment
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        if ([fileManager fileExistsAtPath:@"/var/jb"]) {
-            ROOT_PREFIX = @"/var/jb";
-            NSLog(@"Rootless jailbreak detected - using prefix: %@", ROOT_PREFIX);
-        } else if ([fileManager fileExistsAtPath:@"/var/LIB"]) {
-            ROOT_PREFIX = @"/var/LIB";
-            NSLog(@"Dopamine rootless jailbreak detected - using prefix: %@", ROOT_PREFIX);
-        } else {
-            ROOT_PREFIX = @"";
-            NSLog(@"Traditional jailbreak detected");
-        }
-        
-        // Set paths with the appropriate prefix
-        kGuardianDir = [ROOT_PREFIX stringByAppendingString:@"/Library/WeaponX/Guardian"];
-        kProjectXPath = [ROOT_PREFIX stringByAppendingString:@"/Applications/ProjectX.app/ProjectX"];
+        kGuardianDir = PXGuardianDirectoryPath();
+        kProjectXPath = [PXProjectXApplicationPath() stringByAppendingPathComponent:@"ProjectX"];
         
         _processInfo = [NSMutableDictionary dictionary];
         _protectedProcesses = [NSMutableArray arrayWithObjects:@"ProjectX", nil];
@@ -66,13 +52,12 @@ extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
         [self ensureGuardianDirectoryExists];
         
         // Start logging
-        [self log:[NSString stringWithFormat:@"WeaponXDaemon initialized (rootless: %@, debug: %@)", 
-                   ROOT_PREFIX.length > 0 ? @"YES" : @"NO",
-                   debugMode ? @"YES" : @"NO"] 
+        [self log:[NSString stringWithFormat:@"WeaponXDaemon initialized (RootHide: YES, debug: %@)",
+                   debugMode ? @"YES" : @"NO"]
          withType:OS_LOG_TYPE_INFO];
         
         // Write to stderr directly for visibility
-        fprintf(stderr, "WeaponXDaemon initialized with root prefix: %s\n", [ROOT_PREFIX UTF8String]);
+        fprintf(stderr, "WeaponXDaemon initialized for RootHide\n");
     }
     return self;
 }

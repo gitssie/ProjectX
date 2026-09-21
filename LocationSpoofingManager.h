@@ -46,6 +46,13 @@ typedef NS_ENUM(NSInteger, TransportationMode) {
 
 // GPS data modification
 - (CLLocation *)modifySpoofedLocation:(CLLocation *)originalLocation;
+- (CLLocation *)currentVirtualLocation;
+- (CLHeading *)modifySpoofedHeading:(CLHeading *)originalHeading
+            orientationOffsetDegrees:(double)orientationOffsetDegrees;
+- (CLHeading *)currentVirtualHeadingWithSource:(CLHeading *)sourceHeading;
+- (void)invalidateVirtualLocationSession;
+- (void)refreshVirtualLocationConfiguration;
+- (void)refreshVirtualRouteContext;
 - (double)getSpoofedLatitude;
 - (double)getSpoofedLongitude;
 - (BOOL)shouldSpoofApp:(NSString *)bundleID;

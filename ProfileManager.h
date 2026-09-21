@@ -49,6 +49,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 // Profile ID generation
 - (NSString *)generateProfileID;
+- (NSString *)profileDirectoryForProfile:(Profile *)profile;
 
 @end
 

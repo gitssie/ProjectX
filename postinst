@@ -3,29 +3,20 @@
 # WeaponX Setup Script
 echo "Running WeaponX Setup..."
 
-# Check if we are in a rootless environment
-if [ -d /var/jb ]; then
-  echo "Detected rootless jailbreak environment"
-  ROOT_PREFIX="/var/jb"
-else
-  echo "Detected traditional jailbreak environment"
-  ROOT_PREFIX=""
-fi
-
 # Create the preferences directories if they don't exist
-PREFS_DIR="${ROOT_PREFIX}/var/mobile/Library/Preferences"
+PREFS_DIR="/var/mobile/Library/Preferences"
 mkdir -p "$PREFS_DIR"
 chmod 755 "$PREFS_DIR"
 chown mobile:mobile "$PREFS_DIR"
 
 # Create the WeaponX directories if they don't exist
-WEAPONX_DIR="${ROOT_PREFIX}/var/mobile/Library/WeaponX"
+WEAPONX_DIR="/var/mobile/Library/WeaponX"
 mkdir -p "$WEAPONX_DIR"
 chmod 755 "$WEAPONX_DIR"
 chown mobile:mobile "$WEAPONX_DIR"
 
 # Create WeaponX daemon directories - use root:wheel ownership for daemon
-DAEMON_DIR="${ROOT_PREFIX}/Library/WeaponX"
+DAEMON_DIR="/Library/WeaponX"
 GUARDIAN_DIR="${DAEMON_DIR}/Guardian"
 mkdir -p "$GUARDIAN_DIR"
 chmod 755 "$DAEMON_DIR"
@@ -148,7 +139,7 @@ if [ ! -f "$SETTINGS_PLIST" ]; then
 fi
 
 # Handle the WeaponX daemon LaunchDaemon
-LAUNCHDAEMON_PATH="${ROOT_PREFIX}/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist"
+LAUNCHDAEMON_PATH="/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist"
 LAUNCHDAEMON_LABEL="com.hydra.weaponx.guardian"
 
 # First make sure the plist exists
@@ -191,16 +182,16 @@ if [ -f "$LAUNCHDAEMON_PATH" ]; then
   else
     echo "⚠️ Warning: Guardian daemon may not have loaded correctly."
     echo "Checking daemon executable permissions:"
-    ls -la "${ROOT_PREFIX}/Library/WeaponX/WeaponXDaemon"
+    ls -la "${DAEMON_DIR}/WeaponXDaemon"
     
     echo "Checking LaunchDaemon plist:"
     ls -la "$LAUNCHDAEMON_PATH"
     
     echo "Checking log directory permissions:"
-    ls -la "${ROOT_PREFIX}/Library/WeaponX/Guardian/"
+    ls -la "${GUARDIAN_DIR}/"
     
     echo "Attempting direct launch for debugging..."
-    "${ROOT_PREFIX}/Library/WeaponX/WeaponXDaemon" > /dev/null 2>&1 &
+    "${DAEMON_DIR}/WeaponXDaemon" > /dev/null 2>&1 &
     DAEMON_PID=$!
     sleep 2
     if kill -0 $DAEMON_PID 2>/dev/null; then
@@ -214,8 +205,8 @@ if [ -f "$LAUNCHDAEMON_PATH" ]; then
       echo "❌ Direct launch failed. Daemon might have errors."
     fi
     
-    echo "Log files should appear at: ${ROOT_PREFIX}/Library/WeaponX/Guardian/"
-    ls -la "${ROOT_PREFIX}/Library/WeaponX/Guardian/"
+    echo "Log files should appear at: ${GUARDIAN_DIR}/"
+    ls -la "${GUARDIAN_DIR}/"
   fi
 else
   echo "ERROR: LaunchDaemon plist not found at ${LAUNCHDAEMON_PATH}"

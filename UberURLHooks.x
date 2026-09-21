@@ -9,6 +9,7 @@
 #import <errno.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <objc/runtime.h>
+#import "PXProcessHookPolicy.h"
 
 // Add this at the very beginning of the file, after the imports
 #define DOORDASH_DEBUG 1
@@ -877,6 +878,9 @@ static void performDelayedSetup(void) {
 }
 
 %ctor {
+    if (!PXCurrentProcessMayInstallApplicationHooks()) {
+        return;
+    }
     // Only hook in the Uber or DoorDash applications
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     NSString *processName = [[[NSProcessInfo processInfo] processName] lowercaseString];

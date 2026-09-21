@@ -2,6 +2,10 @@
 #import "UptimeManager.h"
 #import "ProfileManager.h"
 #import "ProjectXLogging.h"
+#import "PXRootHidePath.h"
+#import "PXProcessHookPolicy.h"
+#import "IdentifierManager.h"
+#import "PXSysctlHookRouter.h"
 #import <Foundation/Foundation.h>
 #import <sys/sysctl.h>
 #import <sys/time.h>
@@ -31,9 +35,7 @@ static NSDate *cacheTimestamp = nil;
 static const NSTimeInterval kCacheValidityDuration = 30.0; // 30 seconds cache
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+#define kScopedAppsPath PXGlobalScopePreferencesPath()
 
 // Scoped apps cache
 static NSMutableDictionary *scopedAppsCache = nil;
@@ -49,7 +51,7 @@ static NSString *getCurrentProfilePath(void);
 static void updateCachedBootTimeValues(void);
 static void logBootTimeAccess(const char *method, NSString *bundleID);
 static NSString *getCurrentBundleID(void);
-static NSDictionary *loadScopedApps(void);
+static NSDictionary *loadScopedApps(void) __attribute__((unused));
 static BOOL isInScopedAppsList(void);
 static void installSystemCallHooks(void);
 static BOOL isBootTimeOrUptimeEnabled(void);
@@ -86,7 +88,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
+        NSArray *possiblePaths = @[kScopedAppsPath];
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *validPath = nil;
         
@@ -138,25 +140,8 @@ static NSDictionary *loadScopedApps(void) {
 static BOOL isInScopedAppsList(void) {
     @try {
         NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        
-        // Check if this bundle ID is in the scoped apps dictionary
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        
-        // Check if the app is enabled
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-        
+        return bundleID.length > 0 &&
+            [[IdentifierManager sharedManager] shouldSpoofForBundle:bundleID];
     } @catch (NSException *e) {
         return NO;
     }
@@ -164,47 +149,8 @@ static BOOL isInScopedAppsList(void) {
 
 // Check if boot time spoofing should be applied for the current app
 static BOOL shouldSpoofBootTimeForApp(void) {
-    static NSMutableDictionary *bundleDecisionCache = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        bundleDecisionCache = [NSMutableDictionary dictionary];
-    });
-    
     @try {
-        NSString *bundleID = getCurrentBundleID();
-        if (!bundleID) return NO;
-        
-        // Check cache first
-        NSString *cacheKey = bundleID;
-        NSString *timestampKey = [bundleID stringByAppendingString:@"_timestamp"];
-        NSNumber *cachedDecision = bundleDecisionCache[cacheKey];
-        NSDate *decisionTimestamp = bundleDecisionCache[timestampKey];
-        
-        if (cachedDecision && decisionTimestamp && 
-            [[NSDate date] timeIntervalSinceDate:decisionTimestamp] < 300.0) { // 5 minute cache
-            return [cachedDecision boolValue];
-        }
-        
-        // Always exclude system processes
-        if ([bundleID hasPrefix:@"com.apple."] || 
-            [bundleID isEqualToString:@"com.hydra.projectx"] ||
-            [bundleID hasPrefix:@"com.saurik."] ||
-            [bundleID hasPrefix:@"org.coolstar."] ||
-            [bundleID hasPrefix:@"com.ex.substitute"]) {
-            bundleDecisionCache[cacheKey] = @NO;
-            bundleDecisionCache[timestampKey] = [NSDate date];
-            return NO;
-        }
-        
-        // Check if the current app is a scoped app
-        BOOL isScoped = isInScopedAppsList();
-        
-        // Cache the decision
-        bundleDecisionCache[cacheKey] = @(isScoped);
-        bundleDecisionCache[timestampKey] = [NSDate date];
-        
-        return isScoped;
-        
+        return isInScopedAppsList();
     } @catch (NSException *e) {
         return NO;
     }
@@ -220,7 +166,7 @@ static NSString *getCurrentProfilePath(void) {
         if (!currentProfile) return nil;
         
         // Use the hardcoded profiles directory path since profilesDirectory is private
-        NSString *profilesDir = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesDir = PXProfilesDirectoryPath();
         return [profilesDir stringByAppendingPathComponent:currentProfile.profileId];
     } @catch (NSException *e) {
         return nil;
@@ -394,6 +340,17 @@ int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp,
     return -1;
 }
 
+static BOOL PXBootTimeSysctlByNameHandler(const char *name,
+                                          void *oldp,
+                                          size_t *oldlenp,
+                                          void *newp,
+                                          size_t newlen,
+                                          int *result) {
+    if (!name || strcmp(name, "kern.boottime") != 0) return NO;
+    *result = hook_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+    return YES;
+}
+
 // Hook for -[NSProcessInfo systemUptime]
 static NSTimeInterval (*orig_systemUptime)(NSProcessInfo *, SEL);
 static NSTimeInterval hook_systemUptime(NSProcessInfo *self, SEL _cmd) {
@@ -413,19 +370,14 @@ static void installSystemCallHooks(void) {
             return; // Already installed
         }
         
-        BOOL hookingSuccess = NO;
+        orig_sysctlbyname = PXCallOriginalSysctlByName;
+        BOOL hookingSuccess = PXRegisterSysctlByNameHandler(PXBootTimeSysctlByNameHandler);
         
         // Try ElleKit first (preferred for rootless jailbreaks)
         if (EKIsElleKitEnv() || dlsym(RTLD_DEFAULT, "EKHook")) {
             // Hook sysctl
             void *sysctlPtr = dlsym(RTLD_DEFAULT, "sysctl");
             if (sysctlPtr && EKHook(sysctlPtr, (void *)hook_sysctl, (void **)&orig_sysctl) == 0) {
-                hookingSuccess = YES;
-            }
-            
-            // Hook sysctlbyname
-            void *sysctlbynamePtr = dlsym(RTLD_DEFAULT, "sysctlbyname");
-            if (sysctlbynamePtr && EKHook(sysctlbynamePtr, (void *)hook_sysctlbyname, (void **)&orig_sysctlbyname) == 0) {
                 hookingSuccess = YES;
             }
             
@@ -437,11 +389,6 @@ static void installSystemCallHooks(void) {
                 hookingSuccess = YES;
             }
             
-            void *sysctlbynamePtr = dlsym(RTLD_DEFAULT, "sysctlbyname");
-            if (sysctlbynamePtr) {
-                MSHookFunction(sysctlbynamePtr, (void *)hook_sysctlbyname, (void **)&orig_sysctlbyname);
-                hookingSuccess = YES;
-            }
         }
         
         if (hookingSuccess) {
@@ -467,18 +414,14 @@ static void installSystemCallHooks(void) {
 
 %ctor {
     @autoreleasepool {
+        if (!PXCurrentProcessMayInstallApplicationHooks()) {
+            return;
+        }
         @try {
             NSString *bundleID = getCurrentBundleID();
             
             // Skip if we can't get bundle ID
             if (!bundleID || [bundleID length] == 0) {
-                return;
-            }
-            
-            // Skip system processes completely
-            if ([bundleID hasPrefix:@"com.apple."] && 
-                ![bundleID isEqualToString:@"com.apple.mobilesafari"] &&
-                ![bundleID isEqualToString:@"com.apple.webapp"]) {
                 return;
             }
             

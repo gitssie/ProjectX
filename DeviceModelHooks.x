@@ -3,6 +3,9 @@
 #import "IdentifierManager.h"
 #import "ProfileManager.h"
 #import "ProjectXLogging.h"
+#import "PXRootHidePath.h"
+#import "PXProcessHookPolicy.h"
+#import "PXSysctlHookRouter.h"
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <sys/utsname.h>
@@ -59,7 +62,7 @@ static BOOL isDeviceModelSpoofingEnabled() {
         }
         
         IdentifierManager *manager = [NSClassFromString(@"IdentifierManager") sharedManager];
-        if (!manager || ![manager isApplicationEnabled:currentBundleID]) {
+        if (!manager || ![manager shouldSpoofForBundle:currentBundleID]) {
             shouldSpoof = NO;
         } else {
             // Check if device model spoofing is specifically enabled
@@ -68,7 +71,7 @@ static BOOL isDeviceModelSpoofingEnabled() {
             // If the direct check fails, try profile settings directly
             if (!shouldSpoof) {
                 // Try to get profile settings directly from file
-                NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+                NSString *profilesPath = PXProfilesDirectoryPath();
                 NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
                 NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
                 
@@ -123,7 +126,7 @@ static NSString* getSpoofedDeviceModel() {
     @try {
         // METHOD 1: Try direct access from profile plist for highest reliability
         // First get current profile ID
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesPath = PXProfilesDirectoryPath();
         NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
         NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
         
@@ -189,7 +192,7 @@ static NSString* getSpoofedBoardID() {
         }
         
         // METHOD 1: Try to get from device_ids.plist directly
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesPath = PXProfilesDirectoryPath();
         NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
         NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
         NSString *profileId = centralInfo[@"ProfileId"];
@@ -237,7 +240,7 @@ static NSString* getSpoofedHWModel() {
         }
         
         // METHOD 1: Try to get from device_ids.plist directly
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesPath = PXProfilesDirectoryPath();
         NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
         NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
         NSString *profileId = centralInfo[@"ProfileId"];
@@ -391,6 +394,19 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
 }
 
+static BOOL PXDeviceModelSysctlByNameHandler(const char *name,
+                                             void *oldp,
+                                             size_t *oldlenp,
+                                             void *newp,
+                                             size_t newlen,
+                                             int *result) {
+    if (!name || (strcmp(name, "hw.machine") != 0 && strcmp(name, "hw.model") != 0)) {
+        return NO;
+    }
+    *result = hook_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+    return YES;
+}
+
 // Hook for IOKit device property - used by some apps to get detailed device info
 static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options) {
     // Call original first to avoid unnecessary operations
@@ -521,6 +537,8 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
     
     return result;
 }
+
+%group PXScopedDeviceModelHooks
 
 // MGCopyAnswer hook for device model
 %hookf(NSString *, MGCopyAnswer, CFStringRef property) {
@@ -713,6 +731,8 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
 
 %end
 
+%end
+
 // This declaration was already added at the top of the file, so remove this duplicate declaration
 // static int (*orig_sysctl)(int *, u_int, void *, size_t *, void *, size_t);
 
@@ -816,6 +836,9 @@ static void logDeviceModelAccess(const char* method, NSString* bundleID) {
 
 %ctor {
     @autoreleasepool {
+        if (!PXCurrentProcessMayInstallApplicationHooks()) {
+            return;
+        }
         PXLog(@"[model] Initializing device model spoofing hooks");
         
         // CRITICAL SAFETY CHECK: Only initialize hooks if we can get a valid bundle ID
@@ -826,17 +849,17 @@ static void logDeviceModelAccess(const char* method, NSString* bundleID) {
             return;
         }
         
-        // Don't hook system processes
-        if ([currentBundleID hasPrefix:@"com.apple."] || 
-            [currentBundleID isEqualToString:@"com.hydra.projectx"] || 
+        // The central process policy already rejects every Apple bundle except
+        // an explicitly selected Safari or Photos target.
+        if ([currentBundleID isEqualToString:@"com.hydra.projectx"] ||
             [currentBundleID isEqualToString:@"com.hydra.weaponx"]) {
-            PXLog(@"[model] Not hooking system process: %@", currentBundleID);
+            PXLog(@"[model] Not hooking ProjectX-owned process: %@", currentBundleID);
             return;
         }
         
         // Check if this app is even enabled for spoofing before initializing hooks
         IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-        if (!manager || ![manager isApplicationEnabled:currentBundleID]) {
+        if (!manager || ![manager shouldSpoofForBundle:currentBundleID]) {
             PXLog(@"[model] App %@ is not enabled for spoofing, not initializing hooks", currentBundleID);
             return;
         }
@@ -866,11 +889,11 @@ static void logDeviceModelAccess(const char* method, NSString* bundleID) {
             PXLog(@"[model] ERROR hooking uname(): %@", e);
         }
         
-        @try {
-            MSHookFunction(sysctlbyname, hook_sysctlbyname, (void **)&orig_sysctlbyname);
-            PXLog(@"[model] Hooked sysctlbyname() successfully");
-        } @catch (NSException *e) {
-            PXLog(@"[model] ERROR hooking sysctlbyname(): %@", e);
+        orig_sysctlbyname = PXCallOriginalSysctlByName;
+        if (PXRegisterSysctlByNameHandler(PXDeviceModelSysctlByNameHandler)) {
+            PXLog(@"[model] Registered device-model sysctl handler");
+        } else {
+            PXLog(@"[model] ERROR registering device-model sysctl handler");
         }
         
         @try {
@@ -903,5 +926,7 @@ static void logDeviceModelAccess(const char* method, NSString* bundleID) {
         } else {
             PXLog(@"[model] Could not open IOKit framework");
         }
+
+        %init(PXScopedDeviceModelHooks);
     }
 }

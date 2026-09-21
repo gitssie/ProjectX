@@ -7,6 +7,7 @@
 #import "LocationSpoofingManager.h" // Import the new LocationSpoofingManager
 #import "LocationHeaderView.h"
 #import "IPStatusCacheManager.h" // Import for IP and location data saving
+#import "PXRootHidePath.h"
 
 // Forward declaration for app termination
 @interface BottomButtons : NSObject
@@ -18,7 +19,6 @@
 static NSString *const kGoogleMapsAPIKey = @"AIzaSyCXF2ySIyCntOgy53QnqeeqNV_P_9ShfSY"; // Google Maps API key
 static NSString *const kGoogleMapsAPIKeyFallback = @"AIzaSyB41DRUbKWJHPxaFjMAwdrzWzbVKartNGg"; // Fallback Google Maps API key
 static BOOL useAlternativeKey = NO; // Flag to track which API key we're using
-static NSString *ROOT_PREFIX = @""; // Prefix for rootless jailbreak paths
 
 // Add constants for NSUserDefaults keys at the top of the file (after imports but before @interface)
 // Keys for NSUserDefaults persistence
@@ -133,27 +133,21 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
     self.title = @"Map";
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     
-    // Check for rootless jailbreak
     NSFileManager *fileManager = [NSFileManager defaultManager];
-    if ([fileManager fileExistsAtPath:@"/var/jb"]) {
-        ROOT_PREFIX = @"/var/jb/var/mobile/Library/Preferences";
-        PXLog(@"[WeaponX] Detected rootless jailbreak, using path prefix: %@", ROOT_PREFIX);
-    } else {
-        ROOT_PREFIX = @"/var/mobile/Library/Preferences";
-        PXLog(@"[WeaponX] Using standard jailbreak path: %@", ROOT_PREFIX);
-    }
+    NSString *preferencesDirectory = PXPreferencesDirectoryPath();
+    PXLog(@"[WeaponX] Using RootHide preferences path: %@", preferencesDirectory);
     
     // Ensure Preferences directory exists
-    if (![fileManager fileExistsAtPath:ROOT_PREFIX]) {
+    if (![fileManager fileExistsAtPath:preferencesDirectory]) {
         NSError *error;
-        [fileManager createDirectoryAtPath:ROOT_PREFIX 
+        [fileManager createDirectoryAtPath:preferencesDirectory
                 withIntermediateDirectories:YES 
                                  attributes:nil 
                                       error:&error];
         if (error) {
             PXLog(@"[WeaponX] Error creating Preferences directory: %@", error);
         } else {
-            PXLog(@"[WeaponX] Created Preferences directory at: %@", ROOT_PREFIX);
+            PXLog(@"[WeaponX] Created Preferences directory at: %@", preferencesDirectory);
         }
     }
     
@@ -3316,7 +3310,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
 
 // Save a location to favorites
 - (void)saveFavoriteLocation:(NSString *)name withCoordinates:(NSDictionary *)coordinates {
-    NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:@"com.weaponx.gpsspoofing.plist"];
+    NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
     
     if (!settings) {
@@ -3423,7 +3417,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
 // Show favorites list when button is tapped
 - (void)favoritesButtonTapped {
     // Load favorites from settings
-    NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:@"com.weaponx.gpsspoofing.plist"];
+    NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:plistPath];
     NSArray *favorites = settings[@"FavoriteLocations"];
     NSArray *recentLocations = settings[@"RecentLocations"];
@@ -3531,7 +3525,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
 // Show manage favorites view
 - (void)showManageFavoritesView {
     // Load favorites from settings
-    NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:@"com.weaponx.gpsspoofing.plist"];
+    NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:plistPath];
     NSArray *favorites = settings[@"FavoriteLocations"];
     
@@ -3581,7 +3575,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
 
 // Delete all saved locations
 - (void)deleteAllLocations {
-    NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:@"com.weaponx.gpsspoofing.plist"];
+    NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
     
     if (!settings) {
@@ -3803,7 +3797,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
     };
     
     // Get the plist path
-    NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:@"com.weaponx.gpsspoofing.plist"];
+    NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     
     // Load existing settings
     NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
@@ -3946,7 +3940,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
 // Get recent locations
 - (NSArray *)getRecentLocations {
     // Get the plist path
-    NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:@"com.weaponx.gpsspoofing.plist"];
+    NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     
     // Load existing settings
     NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:plistPath];
@@ -3966,7 +3960,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
 // Remove pinned location from NSUserDefaults
 - (void)removePinnedLocationFromUserDefaults {
     // Get the plist path
-    NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:@"com.weaponx.gpsspoofing.plist"];
+    NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     
     // Load existing settings
     NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
@@ -3986,7 +3980,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
 // Check for saved pinned location
 - (void)checkForSavedPinnedLocation {
     // Get the plist path
-    NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:@"com.weaponx.gpsspoofing.plist"];
+    NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     
     PXLog(@"[WeaponX] Checking for saved pinned location at path: %@", plistPath);
     
@@ -4316,7 +4310,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
 
 // Delete a favorite location
 - (void)deleteFavoriteLocation:(NSDictionary *)locationToDelete {
-    NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:@"com.weaponx.gpsspoofing.plist"];
+    NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
     
     if (!settings) {
@@ -4517,7 +4511,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
 // Add method to clear recent locations
 - (void)clearRecentLocations {
     // Get the plist path
-    NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:@"com.weaponx.gpsspoofing.plist"];
+    NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     
     // Load existing settings
     NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
@@ -6894,7 +6888,7 @@ static NSString *const kOpenCageBaseURL = @"https://api.opencagedata.com/geocode
 
 // Check for pinned location from plist and update circle overlay if needed
 - (void)checkPinnedLocationFromPlist {
-    NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:@"com.weaponx.gpsspoofing.plist"];
+    NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:plistPath];
     if (!settings) {
         // Remove circle if no settings file
