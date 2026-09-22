@@ -890,14 +890,14 @@ publish_repository() {
     zstd -q -19 -T1 -f "$publish_repo/Packages" -o "$publish_repo/Packages.zst"
 
     {
-        echo "Origin: ProjectX Local Development"
-        echo "Label: ProjectX Local Development"
+        echo "Origin: XenSpace Local Repository"
+        echo "Label: XenSpace Local Repository"
         echo "Suite: stable"
         echo "Codename: projectx-local"
         echo "Version: 1.0"
         echo "Architectures: iphoneos-arm64e"
         echo "Components: main"
-        echo "Description: Local RootHide development packages for ProjectX"
+        echo "Description: Local RootHide development packages for XenSpace"
         LC_ALL=C date -u '+Date: %a, %d %b %Y %H:%M:%S GMT'
         echo "Acquire-By-Hash: no"
         for publish_section in MD5Sum SHA1 SHA256; do

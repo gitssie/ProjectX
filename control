@@ -1,11 +1,11 @@
 Package: com.hydra.projectx
 Name: XenSpace
-Version: 2.5.3-34
+Version: 2.5.3-35
 Architecture: iphoneos-arm64e
 Description: Spoof device identifiers and bypass security. For Dopamine RootHide on iOS 15+ devices.
 Depends: firmware (>= 15.0), ellekit (>= 0.5), ldid
-Maintainer: HYDRA
-Author: HYDRA
+Maintainer: XenSpace
+Author: XenSpace
 Section: System
 Icon: file:///Applications/ProjectX.app/Icon.png
 Tag: role::enduser, purpose::extension
