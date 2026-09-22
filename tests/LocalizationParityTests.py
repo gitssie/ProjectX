@@ -71,6 +71,24 @@ def main() -> None:
     with (PROJECT_ROOT / "Info.plist").open("rb") as info_file:
         application_info = plistlib.load(info_file)
     assert application_info["CFBundleDevelopmentRegion"] == "en"
+    assert application_info["CFBundleIdentifier"] == "com.hydra.projectx"
+    assert application_info["CFBundleExecutable"] == "ProjectX"
+    assert application_info["CFBundleName"] == "XenSpace"
+    assert application_info["CFBundleDisplayName"] == "XenSpace"
+    assert english["app.title"] == simplified_chinese["app.title"] == "XenSpace"
+    assert english["image.settings.about.title"] == "About XenSpace"
+    assert simplified_chinese["image.settings.about.title"] == "关于 XenSpace"
+    for strings in (
+        english,
+        simplified_chinese,
+        english_usage_descriptions,
+        chinese_usage_descriptions,
+    ):
+        assert all("ProjectX" not in value for value in strings.values())
+
+    control = (PROJECT_ROOT / "control").read_text(encoding="utf-8")
+    assert "Package: com.hydra.projectx\n" in control
+    assert "Name: XenSpace\n" in control
 
 
 if __name__ == "__main__":

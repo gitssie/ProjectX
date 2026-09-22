@@ -279,9 +279,11 @@ static NSString *PXKeychainApplicationIdentifier(NSString *bundleIdentifier,
                               @"Process application identifier has an invalid team prefix");
         return nil;
     }
-
     NSMutableOrderedSet<NSString *> *approvedGroups = [NSMutableOrderedSet
-        orderedSetWithObject:applicationIdentifier];
+        orderedSet];
+    if ([accessGroups containsObject:applicationIdentifier]) {
+        [approvedGroups addObject:applicationIdentifier];
+    }
     NSMutableSet<NSString *> *sharedGroups = [NSMutableSet set];
     if (includeSharedAccessGroups) {
         for (id candidate in accessGroups) {
@@ -293,6 +295,11 @@ static NSString *PXKeychainApplicationIdentifier(NSString *bundleIdentifier,
             [approvedGroups addObject:candidate];
             [sharedGroups addObject:candidate];
         }
+    }
+    if (approvedGroups.count == 0) {
+        PXKeychainCommandFail(error, PXKeychainCommandErrorRejected,
+                              @"No signed Keychain access group is permitted for this request");
+        return nil;
     }
 
     NSArray<NSString *> *keychainClasses = @[

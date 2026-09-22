@@ -14,14 +14,14 @@ def method_body(source: str, start_marker: str, end_marker: str) -> str:
     return source[start:end]
 
 
-def test_app_cleanup_requests_exclusive_keychain_groups_only() -> None:
+def test_app_cleanup_requests_all_signed_target_keychain_groups() -> None:
     body = method_body(
         CLEANER_SOURCE,
         "- (void)clearKeychainTargets:",
         "- (void)clearKeychainForBundleID:",
     )
-    assert "includeSharedAccessGroups:NO" in body
-    assert "includeSharedAccessGroups:YES" not in body
+    assert "includeSharedAccessGroups:YES" in body
+    assert "includeSharedAccessGroups:NO" not in body
 
 
 def test_one_shot_reports_protected_shared_groups_without_failing() -> None:
@@ -35,6 +35,6 @@ def test_one_shot_reports_protected_shared_groups_without_failing() -> None:
 
 
 if __name__ == "__main__":
-    test_app_cleanup_requests_exclusive_keychain_groups_only()
+    test_app_cleanup_requests_all_signed_target_keychain_groups()
     test_one_shot_reports_protected_shared_groups_without_failing()
     print("Keychain cleanup policy regression tests passed.")

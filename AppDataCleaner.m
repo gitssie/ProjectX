@@ -877,7 +877,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
         freshRequestForBundleIdentifier:targets[index]
         profileID:profileID
         generationID:generationID
-        includeSharedAccessGroups:NO
+        includeSharedAccessGroups:YES
         includeSynchronizableItems:NO
         now:[NSDate date]
         ttl:30

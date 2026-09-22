@@ -516,17 +516,16 @@ static BOOL PXKeychainOneShotDrainDescriptor(int descriptor,
         ![applicationIdentifier hasSuffix:expectedSuffix] ||
         ![alternateApplicationIdentifier isEqualToString:applicationIdentifier] ||
         accessGroups.count == 0 ||
-        ![accessGroups.firstObject isKindOfClass:[NSString class]] ||
-        ![accessGroups.firstObject isEqualToString:applicationIdentifier] ||
         [applicationIdentifier containsString:@"*"] ||
         [applicationIdentifier containsString:@"$"] ||
         [applicationIdentifier containsString:@"/"]) {
         return PXKeychainOneShotExecutionFail(
             error,
             PXKeychainOneShotExecutionErrorInvalidSignature,
-            @"One-shot worker authority is not bound to the exact target application group");
+            @"One-shot worker authority has an invalid target identity or no access groups");
     }
-    if (!request.includesSharedAccessGroups && accessGroups.count != 1) {
+    if (!request.includesSharedAccessGroups &&
+        (accessGroups.count != 1 || ![accessGroups.firstObject isEqualToString:applicationIdentifier])) {
         return PXKeychainOneShotExecutionFail(
             error,
             PXKeychainOneShotExecutionErrorInvalidSignature,

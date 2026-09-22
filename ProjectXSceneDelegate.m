@@ -167,7 +167,7 @@
 - (NSUserActivity *)stateRestorationActivityForScene:(UIScene *)scene {
     // Create state restoration activity
     NSUserActivity *activity = [[NSUserActivity alloc] initWithActivityType:@"com.hydra.projectx.state-restoration"];
-    activity.title = @"ProjectX State";
+    activity.title = @"XenSpace State";
     
     // Save view hierarchy state
     if ([scene isKindOfClass:[UIWindowScene class]]) {

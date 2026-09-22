@@ -1,3 +1,3 @@
-"NSLocationWhenInUseUsageDescription" = "ProjectX uses your location only to move the Smart Location pin when you request your current location.";
-"NSLocationAlwaysAndWhenInUseUsageDescription" = "ProjectX uses your location only for location features you explicitly enable.";
-"LocationAccuracyUsageDescription" = "ProjectX uses precise location only to position the Smart Location pin accurately.";
+"NSLocationWhenInUseUsageDescription" = "XenSpace uses your location only to move the Smart Location pin when you request your current location.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "XenSpace uses your location only for location features you explicitly enable.";
+"LocationAccuracyUsageDescription" = "XenSpace uses precise location only to position the Smart Location pin accurately.";

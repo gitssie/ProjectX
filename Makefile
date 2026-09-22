@@ -133,6 +133,12 @@ internal-stage::
 	@chmod 755 $(THEOS_STAGING_DIR)/usr/bin/weaponx-debug
 	@/bin/sh "$(CURDIR)/scripts/check_roothide.sh" --check-staging "$(THEOS_STAGING_DIR)"
 	@/bin/sh "$(CURDIR)/scripts/check_roothide.sh" --check-worker-binary "$(THEOS_STAGING_DIR)"
+	@/bin/sh "$(CURDIR)/tests/run_geo_ip_location_tests.sh"
+	@python3 "$(CURDIR)/tests/SmartLocationGeoIPTests.py"
+	@python3 "$(CURDIR)/tests/HomeDeviceInfoTests.py"
+	@python3 "$(CURDIR)/tests/SettingsAboutIconLayoutTests.py"
+	@python3 "$(CURDIR)/tests/SettingsPendingBannerTests.py"
+	@python3 "$(CURDIR)/tests/LocalizationParityTests.py"
 	@/bin/sh "$(CURDIR)/tests/run_keychain_one_shot_execution_tests.sh" \
 		"$(THEOS_STAGING_DIR)/Library/WeaponX/ProjectXKeychainWorker"
 

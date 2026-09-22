@@ -46,4 +46,21 @@ xcrun --sdk macosx clang \
 PROJECTX_STAGED_KEYCHAIN_WORKER="$staged_worker" \
     "$test_directory/PXKeychainOneShotExecutionTests"
 
+xcrun --sdk macosx clang \
+    -fobjc-arc \
+    -fblocks \
+    -Werror \
+    -DPROJECTX_PATHS_TESTING=1 \
+    -I"$project_root" \
+    "$project_root/KeychainCommandTests.m" \
+    "$project_root/PXKeychainOneShot.m" \
+    "$project_root/KeychainCommand.m" \
+    "$project_root/AppIdentity.m" \
+    "$project_root/PXRootHidePath.m" \
+    -framework Foundation \
+    -framework Security \
+    -o "$test_directory/KeychainCommandTests"
+
+"$test_directory/KeychainCommandTests"
+
 echo "One-shot Keychain staged-layout regression tests passed."

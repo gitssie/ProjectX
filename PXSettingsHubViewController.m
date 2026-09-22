@@ -37,7 +37,8 @@ typedef NS_ENUM(NSInteger, PXEnvironmentRow) {
 
 static NSString *const PXModelCompatibilityIsCompatibleKey = @"isCompatible";
 static NSString *const PXModelCompatibilityMismatchSummaryKey = @"mismatchSummary";
-static const CGFloat PXSettingsAboutLogoSize = 32.0;
+static const CGFloat PXSettingsAboutLogoSize = 20.0;
+static const CGFloat PXSettingsIconLayoutSize = 24.0;
 
 static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     if (![error.domain isEqualToString:PXModelCompatibilityErrorDomain]) {
@@ -139,7 +140,6 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     self.tableView.cellLayoutMarginsFollowReadableWidth = YES;
     self.tableView.accessibilityIdentifier = @"image-settings-list";
     self.tableView.accessibilityLabel = PXLocalizedString(@"image.settings.accessibility.list");
-    self.tableView.tableHeaderView = [self pendingChangesBanner];
     self.environmentPolicyStore = [PXEnvironmentPolicyStore sharedStore];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleUILanguagePreferenceChanged:) name:PXUILanguagePreferenceDidChangeNotification object:nil];
     [self reloadPendingConfigurationSummaries];
@@ -153,7 +153,6 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     (void)notification;
     self.title = PXLocalizedString(@"image.settings.title");
     self.tableView.accessibilityLabel = PXLocalizedString(@"image.settings.accessibility.list");
-    self.tableView.tableHeaderView = [self pendingChangesBanner];
     [self reloadPendingConfigurationSummaries];
     if (self.view.window) {
         UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, self.tableView);
@@ -163,32 +162,6 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self reloadPendingConfigurationSummaries];
-}
-
-- (UIView *)pendingChangesBanner {
-    UIListContentConfiguration *content = [UIListContentConfiguration subtitleCellConfiguration];
-    content.text = PXLocalizedString(@"image.settings.pending.title");
-    content.secondaryText = PXLocalizedString(@"image.settings.pending.message");
-    content.image = [UIImage systemImageNamed:@"info.circle.fill"];
-    content.imageProperties.tintColor = UIColor.systemBlueColor;
-    content.textProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
-    content.secondaryTextProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
-    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
-    cell.contentConfiguration = content;
-    cell.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
-    cell.layer.cornerRadius = 12.0;
-    cell.accessibilityLabel = PXLocalizedFormat(@"accessibility.state", content.text, content.secondaryText);
-    cell.accessibilityTraits = UIAccessibilityTraitStaticText;
-    UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0.0, 0.0, UIScreen.mainScreen.bounds.size.width, 76.0)];
-    cell.translatesAutoresizingMaskIntoConstraints = NO;
-    [container addSubview:cell];
-    [NSLayoutConstraint activateConstraints:@[
-        [cell.topAnchor constraintEqualToAnchor:container.topAnchor constant:8.0],
-        [cell.leadingAnchor constraintEqualToAnchor:container.layoutMarginsGuide.leadingAnchor],
-        [cell.trailingAnchor constraintEqualToAnchor:container.layoutMarginsGuide.trailingAnchor],
-        [cell.bottomAnchor constraintEqualToAnchor:container.bottomAnchor constant:-8.0]
-    ]];
-    return container;
 }
 
 - (void)reloadPendingConfigurationSummaries {
@@ -347,10 +320,13 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
         content.image = [[UIImage imageNamed:@"Icon"] imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
         content.imageProperties.maximumSize = CGSizeMake(PXSettingsAboutLogoSize,
                                                          PXSettingsAboutLogoSize);
+        content.imageProperties.cornerRadius = 4.0;
         identifier = @"image-settings-about";
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         cell.accessoryType = UITableViewCellAccessoryNone;
     }
+    content.imageProperties.reservedLayoutSize = CGSizeMake(PXSettingsIconLayoutSize,
+                                                            PXSettingsIconLayoutSize);
     content.imageProperties.tintColor = UIColor.systemBlueColor;
     content.textProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     content.secondaryTextProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];

@@ -325,6 +325,7 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
     PXHomeSection homeSection = [self homeSectionForTableSection:section];
     if (homeSection == PXHomeSectionCurrentEnvironment) { return 5; }
     if (homeSection == PXHomeSectionPrivacyCleanup) { return 3; }
+    if (homeSection == PXHomeSectionPhysicalDevice) { return 1; }
     return 1;
 }
 
@@ -334,6 +335,7 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
         case PXHomeSectionTargetApps: return PXLocalizedString(@"image.home.section.target_apps");
         case PXHomeSectionCurrentEnvironment: return PXLocalizedString(@"image.home.section.current_environment");
         case PXHomeSectionPrivacyCleanup: return PXLocalizedString(@"image.home.section.cleanup");
+        case PXHomeSectionPhysicalDevice: return PXLocalizedString(@"image.home.device.title");
         default: return nil;
     }
 }
@@ -410,9 +412,11 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
             cell.accessibilityTraits |= UIAccessibilityTraitNotEnabled;
         }
         cell.accessibilityIdentifier = [NSString stringWithFormat:@"image-home-cleanup-%ld", (long)indexPath.row];
-    } else {
-        content.text = PXLocalizedString(@"image.home.device.title"); content.secondaryText = [self physicalDeviceSummary]; content.image = [UIImage systemImageNamed:@"iphone.gen3"];
-        cell.selectionStyle = UITableViewCellSelectionStyleNone; cell.accessibilityTraits = UIAccessibilityTraitStaticText; cell.accessibilityIdentifier = @"image-home-device";
+    } else if (section == PXHomeSectionPhysicalDevice) {
+        [self configurePhysicalDeviceContent:content];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.accessibilityTraits = UIAccessibilityTraitStaticText;
+        cell.accessibilityIdentifier = [NSString stringWithFormat:@"image-home-device-%ld", (long)indexPath.row];
     }
     content.imageProperties.tintColor = UIColor.systemBlueColor;
     content.textProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
@@ -427,6 +431,8 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
     UIListContentConfiguration *content = [UIListContentConfiguration subtitleCellConfiguration];
     content.text = PXLocalizedString(@"image.home.pending.title"); content.secondaryText = PXLocalizedString(@"image.home.pending.message"); content.image = [UIImage systemImageNamed:@"exclamationmark.circle.fill"]; content.imageProperties.tintColor = UIColor.systemOrangeColor;
+    content.textProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    content.secondaryTextProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleCaption1];
     cell.contentConfiguration = content; cell.selectionStyle = UITableViewCellSelectionStyleNone; cell.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor; cell.accessibilityIdentifier = @"image-home-pending"; cell.accessibilityLabel = PXLocalizedFormat(@"accessibility.state", content.text, content.secondaryText); cell.accessibilityTraits = UIAccessibilityTraitStaticText;
     return cell;
 }
@@ -468,6 +474,28 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
     NSArray<NSString *> *details = @[@"image.home.cleanup.pasteboard.detail", @"image.home.cleanup.keychain.detail", @"image.home.cleanup.safari.detail"];
     NSArray<NSString *> *symbols = @[@"doc.on.clipboard", @"key", @"safari"];
     content.text = PXLocalizedString(titles[(NSUInteger)row]); content.secondaryText = PXLocalizedString(details[(NSUInteger)row]); content.image = [UIImage systemImageNamed:symbols[(NSUInteger)row]];
+}
+
+- (void)configurePhysicalDeviceContent:(UIListContentConfiguration *)content {
+    DeviceModelManager *manager = DeviceModelManager.sharedManager;
+    NSDictionary<NSString *, id> *record = [manager physicalDeviceSpecificationRecord];
+    NSString *unknown = PXLocalizedString(@"image.home.device.unknown");
+    NSString *modelIdentifier = [record[@"identifier"] isKindOfClass:[NSString class]]
+        ? record[@"identifier"] : [manager physicalDeviceModelIdentifier];
+    NSString *modelName = [record[@"name"] isKindOfClass:[NSString class]]
+        ? record[@"name"] : modelIdentifier;
+    NSString *processor = [record[@"cpuArchitecture"] isKindOfClass:[NSString class]]
+        ? record[@"cpuArchitecture"] : unknown;
+    NSString *systemVersion = UIDevice.currentDevice.systemVersion.length > 0
+        ? [@"iOS " stringByAppendingString:UIDevice.currentDevice.systemVersion]
+        : unknown;
+    content.text = modelName.length > 0 ? modelName : unknown;
+    content.secondaryText = [NSString stringWithFormat:@"%@ · %@ · %@",
+        systemVersion,
+        modelIdentifier.length > 0 ? modelIdentifier : unknown,
+        processor.length > 0 ? processor : unknown];
+    content.secondaryTextProperties.numberOfLines = 0;
+    content.image = [UIImage systemImageNamed:@"iphone"];
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -900,5 +928,4 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
 }
 
 - (nullable NSDictionary<NSString *, id> *)resolvedEnvironmentModelWithDidMigrate:(BOOL *)didMigrate error:(NSError **)error { DeviceModelManager *manager = DeviceModelManager.sharedManager; return PXResolveEnvironmentModelSelection(self.environmentPolicyStore, [manager allDeviceSpecificationRecords], [manager physicalDeviceSpecificationRecord], PXCurrentGraphicsHostCapabilities(), didMigrate, error); }
-- (NSString *)physicalDeviceSummary { DeviceModelManager *manager = DeviceModelManager.sharedManager; NSDictionary<NSString *, id> *record = [manager physicalDeviceSpecificationRecord]; NSString *modelName = [record[@"name"] isKindOfClass:[NSString class]] ? record[@"name"] : UIDevice.currentDevice.localizedModel; return PXLocalizedFormat(@"image.home.device.summary", modelName ?: PXLocalizedString(@"image.home.device.unknown"), UIDevice.currentDevice.systemVersion ?: PXLocalizedString(@"image.home.device.unknown")); }
 @end

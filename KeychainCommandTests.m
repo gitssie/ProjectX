@@ -356,10 +356,7 @@ static void testOneShotControllerClearsVintedSignedCustomGroup(void) {
         @"requestID": request.requestID,
         @"targetBundleID": request.targetBundleID,
         @"success": @YES,
-        @"results": successfulOneShotResults(
-            @[applicationIdentifier, vintedAccessGroup],
-            vintedAccessGroup
-        ),
+        @"results": successfulOneShotResults(@[vintedAccessGroup], vintedAccessGroup),
         @"failureCode": @"",
         @"protectedSharedAccessGroupCount": @0
     } error:nil];
@@ -377,7 +374,9 @@ static void testOneShotControllerClearsVintedSignedCustomGroup(void) {
     assert(response.protectedSharedAccessGroupCount == 0);
     assert(execution.invocationCount == 1);
     assert(([execution.lastWorkerEntitlements[@"keychain-access-groups"] isEqualToArray:
-        @[applicationIdentifier, vintedAccessGroup]]));
+        @[vintedAccessGroup]]));
+    assert(![execution.lastWorkerEntitlements[@"keychain-access-groups"]
+        containsObject:applicationIdentifier]);
 }
 
 static void testOneShotEntitlementPlanRejectsDuplicateSignedGroups(void) {
@@ -585,7 +584,63 @@ static void testOneShotControllerRejectsWorkerResultsOutsideExactApplicationGrou
 
 @end
 
-static void testOneShotControllerRejectsIncompleteProtectedGroupCleanup(void) {
+@interface VintedCustomGroupSecurityAdapter : SuccessfulSecurityAdapter
+@property (nonatomic, strong) NSMutableSet<NSString *> *deletedGroups;
+@end
+
+@implementation VintedCustomGroupSecurityAdapter
+
+- (instancetype)init {
+    self = [super init];
+    if (self) _deletedGroups = [NSMutableSet set];
+    return self;
+}
+
+- (NSDictionary<NSString *, id> *)entitlementsForBundleIdentifier:(NSString *)bundleIdentifier
+                                                             error:(NSError **)error {
+    (void)error;
+    assert([bundleIdentifier isEqualToString:@"lt.manodrabuziai.fr"]);
+    return @{
+        @"application-identifier": @"4Y2CNF6C99.lt.manodrabuziai.fr",
+        @"keychain-access-groups": @[@"4Y2CNF6C99.com.vinted.keychain-group"]
+    };
+}
+
+- (int32_t)deleteItemsForClass:(NSString *)keychainClass
+                   accessGroup:(NSString *)accessGroup
+                synchronizable:(BOOL)synchronizable {
+    assert([accessGroup isEqualToString:@"4Y2CNF6C99.com.vinted.keychain-group"]);
+    [self.deletedGroups addObject:accessGroup];
+    return [super deleteItemsForClass:keychainClass
+                         accessGroup:accessGroup
+                      synchronizable:synchronizable];
+}
+
+@end
+
+static void testExecutorClearsOnlyVintedSignedCustomGroup(void) {
+    NSString *bundleIdentifier = @"lt.manodrabuziai.fr";
+    PXKeychainCommandRequest *request = [PXKeychainCommandRequest
+        requestWithPropertyList:freshRequestPropertyList(bundleIdentifier)
+        error:nil];
+    VintedCustomGroupSecurityAdapter *adapter = [[VintedCustomGroupSecurityAdapter alloc] init];
+    PXKeychainCommandExecutor *executor = [[PXKeychainCommandExecutor alloc]
+        initWithValidator:[[PXKeychainCommandValidator alloc] init]
+        securityAdapter:adapter];
+    NSError *error = nil;
+    PXKeychainCommandResponse *response = [executor
+        executeRequest:request
+               context:context(bundleIdentifier, YES, NO)
+                   now:[NSDate dateWithTimeIntervalSince1970:1010]
+                 error:&error];
+    assert(response.isSuccessful);
+    assert(error == nil);
+    assert(response.results.count == 5);
+    assert([adapter.deletedGroups isEqualToSet:
+        [NSSet setWithObject:@"4Y2CNF6C99.com.vinted.keychain-group"]]);
+}
+
+static void testOneShotControllerReportsProtectedGroupForExclusiveCleanup(void) {
     NSMutableDictionary<NSString *, id> *propertyList =
         [freshRequestPropertyList(@"com.example.target") mutableCopy];
     propertyList[@"includeSharedAccessGroups"] = @NO;
@@ -600,6 +655,15 @@ static void testOneShotControllerRejectsIncompleteProtectedGroupCleanup(void) {
             @"TEAM123.group.example.shared"
         ]
     };
+    execution.response = [PXKeychainCommandResponse responseWithPropertyList:@{
+        @"schemaVersion": @(PXKeychainCommandSchemaVersion),
+        @"requestID": request.requestID,
+        @"targetBundleID": request.targetBundleID,
+        @"success": @YES,
+        @"results": successfulOneShotResults(@[@"TEAM123.com.example.target"], @""),
+        @"failureCode": @"",
+        @"protectedSharedAccessGroupCount": @0
+    } error:nil];
     NSError *error = nil;
     PXKeychainOneShotResponse *response = [[[PXKeychainOneShotController alloc]
         initWithExecution:execution]
@@ -608,9 +672,12 @@ static void testOneShotControllerRejectsIncompleteProtectedGroupCleanup(void) {
                    now:[NSDate dateWithTimeIntervalSince1970:1010]
                   error:&error];
 
-    assert(response == nil);
-    assert([error.domain isEqualToString:PXKeychainOneShotErrorDomain]);
-    assert(execution.invocationCount == 0);
+    assert(response.isSuccessful);
+    assert(error == nil);
+    assert(response.protectedSharedAccessGroupCount == 1);
+    assert(execution.invocationCount == 1);
+    assert([execution.lastWorkerEntitlements[@"keychain-access-groups"] isEqualToArray:
+        @[@"TEAM123.com.example.target"]]);
 }
 
 
@@ -1289,7 +1356,8 @@ int main(void) {
         testOneShotEntitlementPlanRejectsDuplicateSignedGroups();
         testOneShotControllerDoesNotLeakGroupsAcrossMultipleSelectedApps();
         testOneShotControllerRejectsSynchronizableCleanupBeforeExecution();
-        testOneShotControllerRejectsIncompleteProtectedGroupCleanup();
+        testOneShotControllerReportsProtectedGroupForExclusiveCleanup();
+        testExecutorClearsOnlyVintedSignedCustomGroup();
         testOneShotControllerRejectsWorkerResultsOutsideExactApplicationGroup();
         testFullSuccessRequiresPostDeleteVerificationForEveryScope();
         testPartialFailureIsNotSuccessAndResponseContainsNoItemMetadata();

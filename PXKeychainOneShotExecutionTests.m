@@ -247,7 +247,9 @@ static PXKeychainCommandContext *PXTestContextForRequest(PXKeychainCommandReques
         extensionEnabled:NO];
 }
 
-static void PXTestProductionExecutionSignsRunsAndCleansSignedTargetGroups(void) {
+static void PXTestProductionExecutionSignsRunsAndCleansSignedTargetGroups(
+    BOOL customGroupOnly
+) {
     NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:
         [@"projectx-one-shot-tests-" stringByAppendingString:NSUUID.UUID.UUIDString]];
     NSString *operationsRoot = [root stringByAppendingPathComponent:@"operations"];
@@ -272,17 +274,14 @@ static void PXTestProductionExecutionSignsRunsAndCleansSignedTargetGroups(void) 
     runner.ldidPath = @"/bootstrap/usr/bin/ldid";
     runner.targetExecutablePath = resolver.targetExecutablePath;
     runner.rootHideDependencyRootPath = root;
+    NSArray<NSString *> *signedGroups = customGroupOnly
+        ? @[@"TEAM123.group.shared"]
+        : @[@"TEAM123.com.example.target", @"TEAM123.group.shared"];
     runner.targetEntitlements = @{
         @"application-identifier": @"TEAM123.com.example.target",
-        @"keychain-access-groups": @[
-            @"TEAM123.com.example.target",
-            @"TEAM123.group.shared"
-        ]
+        @"keychain-access-groups": signedGroups
     };
-    runner.expectedWorkerAccessGroups = @[
-        @"TEAM123.com.example.target",
-        @"TEAM123.group.shared"
-    ];
+    runner.expectedWorkerAccessGroups = signedGroups;
     runner.events = [NSMutableArray array];
     runner.duplicateEntitlementSlices = YES;
     PXKeychainOneShotExecution *execution = [[PXKeychainOneShotExecution alloc]
@@ -792,10 +791,44 @@ static void PXTestProductionExecutionRejectsMismatchedEntitlementSlices(void) {
     assert(error != nil);
 }
 
+static void PXTestOneShotUsesOnlyVintedSignedCustomGroup(void) {
+    NSDictionary<NSString *, id> *entitlements = @{
+        @"application-identifier": @"4Y2CNF6C99.lt.manodrabuziai.fr",
+        @"keychain-access-groups": @[@"4Y2CNF6C99.com.vinted.keychain-group"]
+    };
+    NSError *error = nil;
+    PXKeychainOneShotEntitlementPlan *plan = [PXKeychainOneShotEntitlementPlan
+        planForBundleIdentifier:@"lt.manodrabuziai.fr"
+        signedEntitlements:entitlements
+        includeSharedAccessGroups:YES
+        error:&error];
+    assert(plan != nil);
+    assert(error == nil);
+    NSArray<NSString *> *expectedGroups = @[@"4Y2CNF6C99.com.vinted.keychain-group"];
+    assert([plan.workerEntitlements[@"keychain-access-groups"] isEqualToArray:expectedGroups]);
+    assert(plan.deletionPlan.scopes.count == 5);
+    for (PXKeychainDeletionScope *scope in plan.deletionPlan.scopes) {
+        assert([scope.accessGroup isEqualToString:expectedGroups.firstObject]);
+        assert(scope.isSharedAccessGroup);
+        assert(!scope.isSynchronizable);
+    }
+    assert(![plan.workerEntitlements[@"keychain-access-groups"]
+        containsObject:plan.applicationIdentifier]);
+
+    error = nil;
+    assert([PXKeychainOneShotEntitlementPlan
+        planForBundleIdentifier:@"lt.manodrabuziai.fr"
+        signedEntitlements:entitlements
+        includeSharedAccessGroups:NO
+        error:&error] == nil);
+    assert(error != nil);
+}
+
 int main(void) {
     @autoreleasepool {
         PXSetRootHidePathConvertersForTesting(PXTestJBRootPath, PXTestRootFSPath);
-        PXTestProductionExecutionSignsRunsAndCleansSignedTargetGroups();
+        PXTestProductionExecutionSignsRunsAndCleansSignedTargetGroups(NO);
+        PXTestProductionExecutionSignsRunsAndCleansSignedTargetGroups(YES);
         PXTestProductionExecutionProtectsSharedGroupsForExclusiveCleanup();
         PXTestProductionExecutionCleansArtifactsAfterSigningFailure();
         PXTestProductionExecutionReportsMissingWorkerTemplate();
@@ -806,6 +839,7 @@ int main(void) {
         PXTestProductionExecutionSupportsRootHideSplitVarTopology();
         PXTestTrustedOperationDirectoryRejectsTraversalSiblingsAndSymlinks();
         PXTestProductionExecutionRejectsMismatchedEntitlementSlices();
+        PXTestOneShotUsesOnlyVintedSignedCustomGroup();
     }
     return 0;
 }

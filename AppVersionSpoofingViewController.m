@@ -388,7 +388,7 @@
 - (void)addButtonTapped {
     // Open scope tab where apps can be added
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Add Apps"
-                                                                   message:@"Please add apps to the scope list using the ProjectX tab (HomeTab)."
+                                                                   message:@"Please add apps to the scope list using the XenSpace tab (HomeTab)."
                                                             preferredStyle:UIAlertControllerStyleAlert];
     
     [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];

@@ -180,8 +180,7 @@ static BOOL PXKeychainOneShotResponseMatchesPlan(PXKeychainCommandResponse *resp
     NSArray *accessGroups = [signedEntitlements[@"keychain-access-groups"] isKindOfClass:[NSArray class]]
         ? signedEntitlements[@"keychain-access-groups"]
         : @[];
-    NSMutableOrderedSet<NSString *> *workerAccessGroups =
-        [NSMutableOrderedSet orderedSetWithObject:deletionPlan.applicationIdentifier];
+    NSMutableOrderedSet<NSString *> *workerAccessGroups = [NSMutableOrderedSet orderedSet];
     NSMutableSet<NSString *> *seenSignedAccessGroups = [NSMutableSet set];
     NSUInteger skippedSharedAccessGroupCount = 0;
     for (id candidate in accessGroups) {
@@ -199,12 +198,11 @@ static BOOL PXKeychainOneShotResponseMatchesPlan(PXKeychainCommandResponse *resp
             return nil;
         }
         [seenSignedAccessGroups addObject:candidate];
-        if (![(NSString *)candidate isEqualToString:deletionPlan.applicationIdentifier]) {
-            if (includeSharedAccessGroups) {
-                [workerAccessGroups addObject:(NSString *)candidate];
-            } else {
-                skippedSharedAccessGroupCount++;
-            }
+        if ([(NSString *)candidate isEqualToString:deletionPlan.applicationIdentifier] ||
+            includeSharedAccessGroups) {
+            [workerAccessGroups addObject:(NSString *)candidate];
+        } else {
+            skippedSharedAccessGroupCount++;
         }
     }
 
