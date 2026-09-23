@@ -1,0 +1,25 @@
+Origin: XenSpace
+Label: XenSpace
+Suite: stable
+Codename: xenspace
+Version: 1.0
+Architectures: iphoneos-arm64e
+Components: main
+Description: XenSpace packages for Dopamine RootHide on iOS 15+
+Date: Wed, 23 Sep 2026 02:22:42 GMT
+Acquire-By-Hash: no
+MD5Sum:
+ 78ee56b6074ee2a004da903960f5c20c              805 Packages
+ 8fb6ac1e44e3451d7a6c712736f20922              506 Packages.gz
+ ca76304f665e3ca754fa6a92843887e2              588 Packages.xz
+ c1634b0a375d4bbc35d62a2d1d1f2c46              510 Packages.zst
+SHA1:
+ 641f7c00d7e883289669a56b0562d0e09c4d8ffb              805 Packages
+ e7eaa0ff2d2e8fbf932ce3800b4d68b36639d15f              506 Packages.gz
+ b1a4523b2077e82b0eff9af93393359a2c2e5c6a              588 Packages.xz
+ 8fb56daf0449c344f4bdbb493f127ce91deadb29              510 Packages.zst
+SHA256:
+ ff9579028e58d28794d3fb74b4596a85801b83f7eded4f1ab5cb8068afa14141              805 Packages
+ 5459f5d0a28188c65551ee927ed06aa75771c0df7645aec471cc9a51b7d3a2c2              506 Packages.gz
+ 5f937155a85a7dc456301aa4ffe401e92ec2a69dee7a02d503c35952ef7cf64a              588 Packages.xz
+ ca5a47c5541f5b5b1ae8a850c1c22328afd61a094905f8ca6cc5b105497e83bf              510 Packages.zst
