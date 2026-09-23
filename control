@@ -9,3 +9,6 @@ Author: XenSpace
 Section: System
 Icon: file:///Applications/ProjectX.app/Icon.png
 Tag: role::enduser, purpose::extension
+Homepage: https://gitssie.github.io/ProjectX/
+Depiction: https://gitssie.github.io/ProjectX/
+SileoDepiction: https://gitssie.github.io/ProjectX/depiction.json

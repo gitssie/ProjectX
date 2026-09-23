@@ -299,6 +299,27 @@ chmod 600 .deploy/deploy.env
 
 版本、文件名和 hash 必须由脚本从当次 build artifact 读取，不得硬编码历史值。任何手工生成的 deb/repository metadata 都不是可部署 artifact。
 
+### 8.2 GitHub Pages 公共 Sileo 源
+
+`scripts/publish_github_pages.sh` 是唯一规范的公共 GitHub Pages 发布入口。它复用本机 RootHide warning/package gate 与 `scripts/deploy_sileo.sh` 的 APT repository generation，在 `.deploy/tmp/` 下渲染并验证完整站点，然后通过隔离的临时 Git repository 更新远端 `gh-pages`；不得在当前 `main` worktree 中 checkout `gh-pages`，不得 force push，也不得把公共 deb 或生成索引重新提交到 `main`。
+
+首次发布前只需在 GitHub 将 Pages source 设置为 `gh-pages` 的 `/(root)`。之后标准发布命令为：
+
+```sh
+scripts/publish_github_pages.sh --dry-run publish
+scripts/publish_github_pages.sh publish
+```
+
+默认命令执行 clean warning-gated build、RootHide package audit、repository generation、site rendering、isolated commit 和 non-force push。只有需要发布已经生成且仍相对源码 fresh 的当前版本包时，才可显式使用：
+
+```sh
+scripts/publish_github_pages.sh \
+  --package "$PWD/packages/com.hydra.projectx_<version>_iphoneos-arm64e.deb" \
+  publish
+```
+
+公共 source URL 固定为 `https://gitssie.github.io/ProjectX/`，一键添加 URL 为 `sileo://source/https://gitssie.github.io/ProjectX/`。发布前必须满足：当前分支为 clean `main`、本地 HEAD 与远端 `origin/main` 完全一致、package identity/version/architecture 与 `control` 一致，且所有 `Packages*`、`Release`、deb size/hash、HTML 和 depiction validation 通过。脚本只能普通推进远端 `gh-pages`；并发发布或远端发生变化时应由 push rejection 安全停止。
+
 ## 9. 工作流程
 
 1. 开始任务时运行 `bd prime`、`bd ready`，并使用 `bd` 追踪所有持久工作。

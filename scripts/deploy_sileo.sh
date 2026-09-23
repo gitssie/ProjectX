@@ -26,6 +26,8 @@ Usage: scripts/deploy_sileo.sh [--dry-run] COMMAND
 
 Commands:
   deploy   Validate config, build/audit, publish, start, and verify.
+  build-publish
+           Build/audit and publish locally without starting HTTP or SSH services.
   publish  Audit one fresh ProjectX deb and atomically publish APT metadata.
   start    Start or reuse one detached supervisor for owned HTTP/tunnel children.
   verify   Verify repository metadata and every path through the device tunnel.
@@ -49,7 +51,7 @@ Required config keys for deploy/start/verify/status:
   PROJECTX_SILEO_SSH_USER        Must be mobile.
   PROJECTX_SILEO_SSH_IDENTITY    Absolute path to the authorized private key.
 
-Additionally required for deploy/publish:
+Additionally required for deploy/build-publish/publish:
   THEOS                           Absolute RootHide Theos directory.
 
 publish may use PROJECTX_SILEO_PACKAGE to name the one fresh package explicitly;
@@ -85,7 +87,7 @@ while [ "$#" -gt 0 ]; do
             usage
             exit 0
             ;;
-        deploy|publish|start|verify|status|stop|__supervise)
+        deploy|build-publish|publish|start|verify|status|stop|__supervise)
             command_name=$1
             shift
             break
@@ -1429,6 +1431,19 @@ case "$command_name" in
         publish_repository
         start_services
         verify_services
+        ;;
+    build-publish)
+        validate_publish_configuration
+        require_publish_commands
+        if [ "$dry_run" -eq 1 ]; then
+            echo "dry-run: build-audit -> publish to ProjectX/.deploy/repo"
+            echo "dry-run: do not start local HTTP or SSH services"
+            exit 0
+        fi
+        initialize_state
+        acquire_lock
+        build_project
+        publish_repository
         ;;
     publish)
         validate_publish_configuration

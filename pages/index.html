@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#08101f">
+  <meta name="description" content="XenSpace — coherent, local-first environments for Dopamine RootHide on iOS 15+.">
+  <title>XenSpace — RootHide environment control</title>
+  <link rel="icon" href="icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&amp;family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --ink: #08101f;
+      --ink-soft: #0e192c;
+      --panel: rgba(18, 31, 53, .72);
+      --line: rgba(173, 198, 235, .16);
+      --line-strong: rgba(173, 198, 235, .31);
+      --paper: #edf4ff;
+      --muted: #9fb0c8;
+      --quiet: #6f839f;
+      --blue: #4c73ff;
+      --blue-bright: #7695ff;
+      --aqua: #58e0cf;
+      --yellow: #f3c663;
+      --max: 1180px;
+      --display: "Bricolage Grotesque", "Avenir Next", sans-serif;
+      --body: "IBM Plex Sans", "Avenir Next", sans-serif;
+      --mono: "IBM Plex Mono", "SFMono-Regular", monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--paper);
+      background:
+        radial-gradient(circle at 73% 12%, rgba(76, 115, 255, .17), transparent 28rem),
+        radial-gradient(circle at 9% 78%, rgba(88, 224, 207, .08), transparent 24rem),
+        var(--ink);
+      font-family: var(--body);
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .18;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.13'/%3E%3C/svg%3E");
+      mix-blend-mode: soft-light;
+      z-index: 20;
+    }
+
+    a { color: inherit; text-decoration: none; }
+    button { font: inherit; }
+    code { font-family: var(--mono); }
+    ::selection { background: var(--aqua); color: var(--ink); }
+
+    .shell { width: min(var(--max), calc(100% - 40px)); margin: 0 auto; }
+    .nav {
+      height: 78px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand { display: inline-flex; align-items: center; gap: 11px; font-family: var(--display); font-weight: 650; }
+    .brand img { width: 32px; height: 32px; border-radius: 9px; box-shadow: 0 9px 26px rgba(76, 115, 255, .32); }
+    .brand span { letter-spacing: -.02em; }
+    .nav-meta { display: flex; align-items: center; gap: 18px; color: var(--muted); font-size: 13px; }
+    .nav-meta a:hover { color: var(--paper); }
+    .live-dot { display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; letter-spacing: .04em; }
+    .live-dot::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--aqua); box-shadow: 0 0 0 5px rgba(88, 224, 207, .1); }
+
+    .hero {
+      min-height: 690px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.06fr) minmax(390px, .94fr);
+      align-items: center;
+      gap: clamp(42px, 7vw, 96px);
+      padding: 86px 0 92px;
+    }
+    .hero > * { min-width: 0; }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 22px;
+      color: var(--aqua);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+    .eyebrow::before { content: ""; width: 33px; height: 1px; background: var(--aqua); }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 {
+      max-width: 720px;
+      margin-bottom: 25px;
+      font-family: var(--display);
+      font-size: clamp(49px, 6.5vw, 82px);
+      line-height: .96;
+      letter-spacing: -.055em;
+      font-weight: 650;
+    }
+    h1 em { color: var(--blue-bright); font-style: normal; }
+    .lede { max-width: 600px; margin-bottom: 34px; color: var(--muted); font-size: clamp(16px, 2vw, 19px); line-height: 1.68; }
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; }
+    .button {
+      min-height: 50px;
+      padding: 0 21px;
+      border: 1px solid var(--line-strong);
+      border-radius: 13px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: rgba(255, 255, 255, .025);
+      color: var(--paper);
+      font-weight: 600;
+      transition: transform .2s ease, border-color .2s ease, background .2s ease;
+    }
+    .button:hover { transform: translateY(-2px); border-color: rgba(118, 149, 255, .7); background: rgba(76, 115, 255, .08); }
+    .button:focus-visible, .copy:focus-visible, a:focus-visible { outline: 3px solid rgba(88, 224, 207, .72); outline-offset: 3px; }
+    .button-primary { background: var(--paper); color: var(--ink); border-color: var(--paper); box-shadow: 0 18px 55px rgba(76, 115, 255, .2); }
+    .button-primary:hover { background: #fff; border-color: #fff; }
+    .button svg { width: 17px; height: 17px; }
+
+    .source-box {
+      margin-top: 25px;
+      max-width: 610px;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 11px 10px 15px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: rgba(4, 10, 20, .48);
+    }
+    .source-box > span:first-child { color: var(--quiet); font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .09em; }
+    .source-box code { overflow: hidden; color: #c7d5eb; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .copy { border: 0; border-radius: 8px; padding: 8px 10px; color: var(--aqua); background: rgba(88, 224, 207, .08); cursor: pointer; font-family: var(--mono); font-size: 10px; }
+
+    .identity-stage { position: relative; min-height: 500px; display: grid; place-items: center; isolation: isolate; }
+    .identity-stage::before {
+      content: "";
+      position: absolute;
+      width: 380px;
+      height: 380px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(76, 115, 255, .21), rgba(76, 115, 255, .03) 56%, transparent 70%);
+      filter: blur(8px);
+      z-index: -1;
+    }
+    .orbit { position: absolute; border: 1px solid var(--line); border-radius: 50%; animation: turn 32s linear infinite; }
+    .orbit-one { width: 360px; height: 360px; }
+    .orbit-two { width: 270px; height: 270px; animation-direction: reverse; animation-duration: 24s; border-style: dashed; }
+    .orbit-three { width: 190px; height: 190px; animation-duration: 18s; border-color: rgba(88, 224, 207, .22); }
+    .satellite { position: absolute; width: 11px; height: 11px; top: -6px; left: calc(50% - 6px); border-radius: 50%; background: var(--blue-bright); box-shadow: 0 0 18px var(--blue); }
+    .orbit-two .satellite { background: var(--aqua); box-shadow: 0 0 17px rgba(88, 224, 207, .8); }
+    .core {
+      position: relative;
+      width: 138px;
+      height: 138px;
+      padding: 19px;
+      border: 1px solid rgba(188, 205, 236, .24);
+      border-radius: 34px;
+      background: linear-gradient(145deg, rgba(27, 44, 75, .95), rgba(10, 18, 33, .95));
+      box-shadow: 0 38px 100px rgba(0, 0, 0, .52), inset 0 1px rgba(255, 255, 255, .08);
+      z-index: 2;
+    }
+    .core img { width: 100%; height: 100%; border-radius: 23px; }
+    .signal-card {
+      position: absolute;
+      width: 168px;
+      padding: 14px 15px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(12, 23, 41, .8);
+      backdrop-filter: blur(14px);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, .26);
+    }
+    .signal-card span { display: block; color: var(--quiet); font-family: var(--mono); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
+    .signal-card strong { display: flex; align-items: center; gap: 7px; margin-top: 7px; font-family: var(--display); font-size: 15px; font-weight: 600; }
+    .signal-card strong::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--aqua); }
+    .signal-a { top: 54px; right: 6px; }
+    .signal-b { bottom: 60px; left: 0; }
+    .signal-c { bottom: 22px; right: 16px; width: 145px; }
+
+    @keyframes turn { to { transform: rotate(360deg); } }
+
+    .release-rail { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .release-grid { display: grid; grid-template-columns: 1.15fr 1fr 1fr 1.3fr; }
+    .release-item { min-height: 112px; padding: 25px 28px; border-right: 1px solid var(--line); display: flex; flex-direction: column; justify-content: center; }
+    .release-item:first-child { padding-left: 0; }
+    .release-item:last-child { border-right: 0; }
+    .release-item span { margin-bottom: 8px; color: var(--quiet); font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+    .release-item strong { font-family: var(--display); font-size: 18px; font-weight: 600; }
+    .release-item code { color: var(--aqua); font-size: 12px; word-break: break-all; }
+
+    section { padding: 108px 0; }
+    .section-head { display: grid; grid-template-columns: .85fr 1.15fr; gap: 80px; align-items: end; margin-bottom: 50px; }
+    .section-head h2 { margin-bottom: 0; font-family: var(--display); font-size: clamp(35px, 5vw, 58px); line-height: 1; letter-spacing: -.04em; }
+    .section-head p { margin-bottom: 4px; color: var(--muted); font-size: 16px; line-height: 1.7; }
+
+    .capabilities { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .capability {
+      min-height: 265px;
+      padding: 26px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: linear-gradient(150deg, rgba(20, 35, 59, .75), rgba(10, 19, 34, .48));
+      position: relative;
+      overflow: hidden;
+    }
+    .capability::after { content: attr(data-code); position: absolute; right: 19px; top: 17px; color: rgba(159, 176, 200, .32); font-family: var(--mono); font-size: 10px; }
+    .capability-mark { width: 41px; height: 41px; border: 1px solid rgba(118, 149, 255, .35); border-radius: 12px; display: grid; place-items: center; color: var(--blue-bright); background: rgba(76, 115, 255, .08); }
+    .capability-mark svg { width: 19px; }
+    .capability h3 { margin: 66px 0 12px; font-family: var(--display); font-size: 23px; letter-spacing: -.025em; }
+    .capability p { margin-bottom: 0; color: var(--muted); line-height: 1.65; font-size: 14px; }
+
+    .install-panel {
+      display: grid;
+      grid-template-columns: .92fr 1.08fr;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: rgba(12, 23, 41, .62);
+      overflow: hidden;
+    }
+    .install-copy { padding: clamp(31px, 6vw, 67px); }
+    .install-copy h2 { font-family: var(--display); font-size: clamp(37px, 5vw, 59px); line-height: 1; letter-spacing: -.045em; }
+    .install-copy p { color: var(--muted); line-height: 1.7; }
+    .steps { border-left: 1px solid var(--line); }
+    .step { display: grid; grid-template-columns: 61px 1fr; gap: 17px; padding: 28px 30px; border-bottom: 1px solid var(--line); }
+    .step:last-child { border-bottom: 0; }
+    .step-num { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; color: var(--aqua); border: 1px solid rgba(88, 224, 207, .28); font-family: var(--mono); font-size: 11px; }
+    .step h3 { margin: 1px 0 7px; font-family: var(--display); font-size: 18px; }
+    .step p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+
+    .integrity { padding-top: 0; }
+    .integrity-box { padding: 27px; border: 1px solid var(--line); border-radius: 18px; background: rgba(4, 10, 20, .48); }
+    .integrity-top { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 19px; }
+    .integrity-top strong { font-family: var(--display); font-size: 19px; }
+    .verified { color: var(--aqua); font-family: var(--mono); font-size: 10px; letter-spacing: .08em; }
+    .hash { display: block; padding-top: 18px; border-top: 1px solid var(--line); color: #b7c7dd; font-family: var(--mono); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+    .file-line { display: flex; justify-content: space-between; gap: 24px; margin-top: 18px; color: var(--quiet); font-family: var(--mono); font-size: 10px; }
+    .file-line span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    footer { padding: 36px 0 50px; border-top: 1px solid var(--line); color: var(--quiet); font-size: 12px; }
+    .footer-inner { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .footer-inner a { color: var(--muted); }
+    .footer-inner a:hover { color: var(--paper); }
+
+    .reveal { animation: enter .7s both cubic-bezier(.2, .7, .2, 1); }
+    .reveal-delay { animation-delay: .12s; }
+    @keyframes enter { from { opacity: 0; transform: translateY(18px); } }
+
+    @media (max-width: 900px) {
+      .hero { grid-template-columns: minmax(0, 1fr); padding-top: 72px; }
+      .identity-stage { min-height: 450px; }
+      .release-grid { grid-template-columns: repeat(2, 1fr); }
+      .release-item:nth-child(2) { border-right: 0; }
+      .release-item:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+      .release-item:first-child { padding-left: 28px; }
+      .section-head { grid-template-columns: 1fr; gap: 24px; }
+      .capabilities { grid-template-columns: 1fr; }
+      .capability { min-height: 220px; }
+      .install-panel { grid-template-columns: 1fr; }
+      .steps { border-left: 0; border-top: 1px solid var(--line); }
+    }
+
+    @media (max-width: 600px) {
+      .shell { width: min(100% - 28px, var(--max)); }
+      .nav { height: 68px; }
+      .nav-meta { gap: 0; }
+      .nav-meta > a:first-child, .live-dot { display: none; }
+      .nav-meta > a:last-of-type { display: inline-flex; }
+      .hero { min-height: auto; padding: 65px 0 72px; }
+      h1 { font-size: clamp(46px, 15vw, 66px); }
+      .actions { flex-direction: column; }
+      .button { width: 100%; }
+      .source-box { grid-template-columns: 1fr auto; }
+      .source-box > span:first-child { display: none; }
+      .identity-stage { min-height: 390px; overflow: hidden; }
+      .identity-stage::before { width: 300px; height: 300px; }
+      .orbit-one { width: 290px; height: 290px; }
+      .orbit-two { width: 220px; height: 220px; }
+      .orbit-three { width: 160px; height: 160px; }
+      .core { width: 116px; height: 116px; padding: 16px; border-radius: 29px; }
+      .core img { border-radius: 19px; }
+      .signal-card { width: 132px; padding: 11px 12px; }
+      .signal-card strong { font-size: 13px; }
+      .signal-a { right: 0; top: 38px; }
+      .signal-b { left: 0; bottom: 48px; }
+      .signal-c { display: none; }
+      .release-grid { grid-template-columns: 1fr; }
+      .release-item { min-height: 91px; border-right: 0; border-bottom: 1px solid var(--line); padding: 20px 7px; }
+      .release-item:first-child { padding-left: 7px; }
+      .release-item:nth-child(2) { border-bottom: 1px solid var(--line); }
+      .release-item:last-child { border-bottom: 0; }
+      section { padding: 80px 0; }
+      .install-copy { padding: 32px 25px; }
+      .step { grid-template-columns: 46px 1fr; padding: 24px 22px; gap: 12px; }
+      .step-num { width: 36px; height: 36px; }
+      .integrity-top, .file-line, .footer-inner { align-items: flex-start; flex-direction: column; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="shell nav">
+    <a class="brand" href="#top" aria-label="XenSpace home">
+      <img src="icon.png" alt="">
+      <span>XenSpace</span>
+    </a>
+    <nav class="nav-meta" aria-label="Primary navigation">
+      <a href="#capabilities">Capabilities</a>
+      <a href="#install">Install</a>
+      <span class="live-dot">RootHide channel</span>
+    </nav>
+  </header>
+
+  <main id="top">
+    <div class="shell hero">
+      <div class="reveal">
+        <div class="eyebrow">Local-first environment control</div>
+        <h1>Every signal.<br><em>In agreement.</em></h1>
+        <p class="lede">XenSpace coordinates device identity, regional context, target-app scope, and cleanup as one coherent environment—directly on your RootHide device.</p>
+        <div class="actions">
+          <a class="button button-primary" href="{{SILEO_URL}}">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M5 20h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Add to Sileo
+          </a>
+          <a class="button" href="{{PACKAGE_URL}}">
+            Download {{VERSION}}
+          </a>
+        </div>
+        <div class="source-box">
+          <span>Source</span>
+          <code id="source-url">{{SOURCE_URL}}</code>
+          <button class="copy" type="button" data-copy="source-url" aria-live="polite">Copy</button>
+        </div>
+      </div>
+
+      <div class="identity-stage reveal reveal-delay" aria-label="Coherent identity signal illustration">
+        <div class="orbit orbit-one"><i class="satellite"></i></div>
+        <div class="orbit orbit-two"><i class="satellite"></i></div>
+        <div class="orbit orbit-three"></div>
+        <div class="core"><img src="icon.png" alt="XenSpace app icon"></div>
+        <div class="signal-card signal-a"><span>Profile generation</span><strong>Stable</strong></div>
+        <div class="signal-card signal-b"><span>Target scope</span><strong>Isolated</strong></div>
+        <div class="signal-card signal-c"><span>Region set</span><strong>Coherent</strong></div>
+      </div>
+    </div>
+
+    <div class="release-rail">
+      <div class="shell release-grid">
+        <div class="release-item"><span>Current release</span><strong>{{VERSION}}</strong></div>
+        <div class="release-item"><span>Architecture</span><strong>{{ARCHITECTURE}}</strong></div>
+        <div class="release-item"><span>System baseline</span><strong>iOS 15+</strong></div>
+        <div class="release-item"><span>Package size</span><strong>{{PACKAGE_SIZE}}</strong></div>
+      </div>
+    </div>
+
+    <section id="capabilities" class="shell">
+      <div class="section-head">
+        <h2>An environment,<br>not a bag of toggles.</h2>
+        <p>XenSpace treats identity values as a system. Hardware, display, locale, carrier, network, and app-scoped identifiers move together so target apps observe one believable device.</p>
+      </div>
+      <div class="capabilities">
+        <article class="capability" data-code="IDENTITY / 01">
+          <div class="capability-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3 4.5 7v5c0 4.4 3 7.5 7.5 9 4.5-1.5 7.5-4.6 7.5-9V7L12 3Z" stroke="currentColor" stroke-width="1.6"/><path d="m8.8 12 2.1 2.1 4.5-4.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          <h3>Coherent identity</h3>
+          <p>Device model, system version, screen geometry, network properties, and identifier lifecycles resolve as one profile.</p>
+        </article>
+        <article class="capability" data-code="SCOPE / 02">
+          <div class="capability-mark"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="7.5" stroke="currentColor" stroke-width="1.6"/><path d="M12 7v5l3.2 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          <h3>Lifecycle-aware scope</h3>
+          <p>Stable values remain stable for the right duration: profile, vendor, boot session, permission state, or app installation.</p>
+        </article>
+        <article class="capability" data-code="LOCAL / 03">
+          <div class="capability-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M5 9.5 12 4l7 5.5V20H5V9.5Z" stroke="currentColor" stroke-width="1.6"/><path d="M9.5 20v-6h5v6" stroke="currentColor" stroke-width="1.6"/></svg></div>
+          <h3>Local by design</h3>
+          <p>No account, subscription, LAN control plane, or remote service. The installed UIKit app is the only control surface.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="install" class="shell">
+      <div class="install-panel">
+        <div class="install-copy">
+          <div class="eyebrow">Install channel</div>
+          <h2>Three steps.<br>One source.</h2>
+          <p>This repository publishes RootHide packages only. Keep the source URL unchanged; future releases arrive through Sileo refresh.</p>
+          <a class="button button-primary" href="{{SILEO_URL}}">Open in Sileo</a>
+        </div>
+        <div class="steps">
+          <div class="step">
+            <div class="step-num">01</div>
+            <div><h3>Add the repository</h3><p>Tap “Open in Sileo,” or add <code>{{SOURCE_URL}}</code> as a source manually.</p></div>
+          </div>
+          <div class="step">
+            <div class="step-num">02</div>
+            <div><h3>Install XenSpace</h3><p>Refresh sources, open the XenSpace package, then choose Install or Reinstall.</p></div>
+          </div>
+          <div class="step">
+            <div class="step-num">03</div>
+            <div><h3>Apply when prompted</h3><p>Allow Sileo to finish package configuration before performing any requested respring.</p></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="shell integrity" aria-labelledby="integrity-title">
+      <div class="integrity-box">
+        <div class="integrity-top"><strong id="integrity-title">Release integrity</strong><span class="verified">● INDEX VERIFIED</span></div>
+        <code class="hash">SHA-256&nbsp;&nbsp;{{SHA256}}</code>
+        <div class="file-line"><span>{{PACKAGE_FILENAME}}</span><span>{{PACKAGE_SIZE}} · {{ARCHITECTURE}}</span></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell footer-inner">
+      <span>© XenSpace · RootHide-only software</span>
+      <div><a href="https://github.com/gitssie/ProjectX">GitHub</a> &nbsp;·&nbsp; <a href="depiction.json">Sileo depiction</a></div>
+    </div>
+  </footer>
+
+  <script>
+    document.querySelectorAll("[data-copy]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const target = document.getElementById(button.dataset.copy);
+        try {
+          await navigator.clipboard.writeText(target.textContent.trim());
+          button.textContent = "Copied";
+          window.setTimeout(() => { button.textContent = "Copy"; }, 1400);
+        } catch (_) {
+          const selection = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(target);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          button.textContent = "Selected";
+        }
+      });
+    });
+  </script>
+</body>
+</html>
