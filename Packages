@@ -11,10 +11,10 @@ Homepage: https://gitssie.github.io/ProjectX/
 Depiction: https://gitssie.github.io/ProjectX/
 SileoDepiction: https://gitssie.github.io/ProjectX/depiction.json
 Architecture: iphoneos-arm64e
-Version: 2.5.3-35
-Installed-Size: 11328
-Filename: pool/com.hydra.projectx_2.5.3-35_iphoneos-arm64e.deb
-Size: 2748508
-MD5sum: 121929ae6c674fb87901a120b9e99671
-SHA1: d606898e61776fa8d0e475df6cc2eba2412463b4
-SHA256: 55aaeff3ac6fd241c20e7e48fc3ac40620208ce37c7237e97e802ec818061bdc
+Version: 2.5.3-36
+Installed-Size: 10772
+Filename: pool/com.hydra.projectx_2.5.3-36_iphoneos-arm64e.deb
+Size: 2627360
+MD5sum: a1dbc956467801ab03c502880603a54b
+SHA1: c74d253440db6186ba84211f3f0cf91d2edab6b4
+SHA256: 6b9cafd11bd8b0e10a9b9697c9d3db390b44331551a80d281a5b387380876719

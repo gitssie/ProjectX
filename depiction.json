@@ -9,7 +9,7 @@
       "views": [
         {
           "class": "DepictionMarkdownView",
-          "markdown": "# XenSpace 2.5.3-35\n\nA local-first environment control toolkit for **Dopamine RootHide** on iOS 15+. XenSpace keeps device identity, regional context, storage cleanup, and target-app behavior coherent as one environment.\n\n## Compatibility\n\n- Dopamine RootHide\n- iOS 15 or later\n- arm64 / arm64e device payload\n\n## Package\n\n- Architecture: `iphoneos-arm64e`\n- Download size: 2.6 MB\n- SHA-256: `55aaeff3ac6fd241c20e7e48fc3ac40620208ce37c7237e97e802ec818061bdc`"
+          "markdown": "# XenSpace 2.5.3-36\n\nA local-first environment control toolkit for **Dopamine RootHide** on iOS 15+. XenSpace keeps device identity, regional context, storage cleanup, and target-app behavior coherent as one environment.\n\n## Compatibility\n\n- Dopamine RootHide\n- iOS 15 or later\n- arm64 / arm64e device payload\n\n## Package\n\n- Architecture: `iphoneos-arm64e`\n- Download size: 2.5 MB\n- SHA-256: `6b9cafd11bd8b0e10a9b9697c9d3db390b44331551a80d281a5b387380876719`"
         },
         {
           "class": "DepictionSeparatorView"
@@ -17,7 +17,7 @@
         {
           "class": "DepictionTableButtonView",
           "title": "Project website",
-          "action": "https://gitssie.github.io/ProjectX/",
+          "action": "https://gitssie.github.io/ProjectX",
           "openExternal": true
         },
         {
@@ -34,12 +34,12 @@
       "views": [
         {
           "class": "DepictionMarkdownView",
-          "markdown": "## Install with Sileo\n\nAdd `https://gitssie.github.io/ProjectX/` as a source, then install **XenSpace**. This build supports RootHide only."
+          "markdown": "## Install with Sileo\n\nAdd `https://gitssie.github.io/ProjectX` as a source, then install **XenSpace**. This build supports RootHide only."
         },
         {
           "class": "DepictionTableButtonView",
           "title": "Add source to Sileo",
-          "action": "sileo://source/https://gitssie.github.io/ProjectX/",
+          "action": "sileo://source/https://gitssie.github.io/ProjectX",
           "openExternal": true
         }
       ]
