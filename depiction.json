@@ -9,7 +9,7 @@
       "views": [
         {
           "class": "DepictionMarkdownView",
-          "markdown": "# XenSpace 2.5.3-36\n\nA local-first environment control toolkit for **Dopamine RootHide** on iOS 15+. XenSpace keeps device identity, regional context, storage cleanup, and target-app behavior coherent as one environment.\n\n## Compatibility\n\n- Dopamine RootHide\n- iOS 15 or later\n- arm64 / arm64e device payload\n\n## Package\n\n- Architecture: `iphoneos-arm64e`\n- Download size: 2.5 MB\n- SHA-256: `6b9cafd11bd8b0e10a9b9697c9d3db390b44331551a80d281a5b387380876719`"
+          "markdown": "# XenSpace 2.5.3-37\n\nA local-first environment control toolkit for **Dopamine RootHide** on iOS 15+. XenSpace keeps device identity, regional context, storage cleanup, and target-app behavior coherent as one environment.\n\n## Compatibility\n\n- Dopamine RootHide\n- iOS 15 or later\n- arm64 / arm64e device payload\n\n## Package\n\n- Architecture: `iphoneos-arm64e`\n- Download size: 2.5 MB\n- SHA-256: `c9df92ef97ba06f35d7379b02dab54b799ea4013f52dbb56688fa742bdd1a5a5`"
         },
         {
           "class": "DepictionSeparatorView"
