@@ -8,9 +8,13 @@
 # ProjectX deployment config, state, repository, and logs are local-only.
 .deploy/
 
-# Local build products and macOS metadata are not source artifacts.
+# Local build products and platform metadata are not source artifacts.
 .theos/
-packages/*.deb
+packages/
+_deb_extract/
+build_check/
+/libAppDataCleaner.dylib
 .DS_Store
+Thumbs.db
 ProjectX.entitlements.xml
 ent.plist.xml
