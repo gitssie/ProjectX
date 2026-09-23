@@ -1,5 +1,4 @@
 #import "StorageManager.h"
-#import "ProfileManager.h"
 #import "ProjectXLogging.h"
 #import "PXRootHidePath.h"
 
@@ -44,17 +43,13 @@
 }
 
 - (void)loadFromCurrentProfile {
-    // Get active profile ID
-    NSString *profilesPath = PXCurrentProfileInfoPath();
-    NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
-    
-    if (currentProfileInfo && currentProfileInfo[@"ProfileId"]) {
-        NSString *profileId = currentProfileInfo[@"ProfileId"];
-        [self loadFromProfile:profileId];
-    } else {
-        // Default values if no profile
+    NSDictionary *savedSettings = PXCurrentProfileValue(@"storage");
+    if (!savedSettings) {
         [self setDefaultStorage];
+        return;
     }
+    [_storageSettings removeAllObjects];
+    [_storageSettings addEntriesFromDictionary:savedSettings];
 }
 
 - (void)setDefaultStorage {
@@ -238,41 +233,7 @@
 #pragma mark - Profile Management
 
 - (void)saveToCurrentProfile {
-    // Get active profile ID
-    NSString *profilesPath = PXCurrentProfileInfoPath();
-    NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
-    
-    if (currentProfileInfo && currentProfileInfo[@"ProfileId"]) {
-        NSString *profileId = currentProfileInfo[@"ProfileId"];
-        [self saveToProfile:profileId];
-    }
-}
-
-- (void)saveToProfile:(NSString *)profileId {
-    if (!profileId) return;
-    
-    NSString *profileDir = PXProfileDirectoryPath(profileId);
-    NSString *storagePath = [profileDir stringByAppendingPathComponent:@"storage.plist"];
-    
-    [_storageSettings writeToFile:storagePath atomically:YES];
-}
-
-- (BOOL)loadFromProfile:(NSString *)profileId {
-    if (!profileId) return NO;
-    
-    NSString *profileDir = PXProfileDirectoryPath(profileId);
-    NSString *storagePath = [profileDir stringByAppendingPathComponent:@"storage.plist"];
-    
-    NSDictionary *savedSettings = [NSDictionary dictionaryWithContentsOfFile:storagePath];
-    if (savedSettings) {
-        [_storageSettings removeAllObjects];
-        [_storageSettings addEntriesFromDictionary:savedSettings];
-        return YES;
-    }
-    
-    // If no saved settings, use defaults
-    [self setDefaultStorage];
-    return NO;
+    PXSetCurrentProfileValue(@"storage", _storageSettings);
 }
 
 #pragma mark - Status Control

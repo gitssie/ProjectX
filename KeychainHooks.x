@@ -8,27 +8,16 @@
 #import "PXProcessKeychainSecurityAdapter.h"
 #import "PXRootHidePath.h"
 
-static NSString *PXKeychainCurrentProfileID(void) {
-    NSDictionary<NSString *, id> *profileInfo = [NSDictionary dictionaryWithContentsOfFile:
-        PXCurrentProfileInfoPath()];
-    NSString *profileID = [profileInfo[@"ProfileId"] isKindOfClass:[NSString class]]
-        ? profileInfo[@"ProfileId"]
-        : nil;
-    return [[NSUUID alloc] initWithUUIDString:profileID] ? profileID.lowercaseString : nil;
-}
-
 static PXKeychainCommandContext *PXKeychainCurrentCommandContext(void) {
     NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
-    NSString *profileID = PXKeychainCurrentProfileID();
-    if (bundleIdentifier.length == 0 || profileID.length == 0) {
+    if (bundleIdentifier.length == 0 ||
+        !PXProfileReadContentsAtPath(PXCurrentProfileInfoPath())) {
         return nil;
     }
-    NSString *profilesRoot = PXProfilesDirectoryPath();
-    NSString *identityDirectory = [[[profilesRoot stringByAppendingPathComponent:profileID]
-        stringByAppendingPathComponent:@"identity"] stringByStandardizingPath];
+    NSString *identityDirectory = PXCurrentProfileIdentityValuesPath();
     PXProfileManifest *manifest = [[[PXProfileStore alloc]
         initWithIdentityDirectory:identityDirectory] activeManifestWithError:nil];
-    if (!manifest || manifest.schemaVersion != 5 ||
+    if (!manifest ||
         ![[NSUUID alloc] initWithUUIDString:manifest.generationID]) {
         return nil;
     }
@@ -36,7 +25,6 @@ static PXKeychainCommandContext *PXKeychainCurrentCommandContext(void) {
     [manager reloadApplicationScope];
     return [[PXKeychainCommandContext alloc]
         initWithBundleIdentifier:bundleIdentifier
-                       profileID:profileID
                     generationID:manifest.generationID.lowercaseString
               applicationEnabled:[manager isApplicationEnabled:bundleIdentifier]
                 extensionEnabled:[manager isExtensionEnabled:bundleIdentifier]];
@@ -143,7 +131,6 @@ static void PXPublishTargetKeychainReadiness(void) {
     if (!context || (!context.isApplicationEnabled && !context.isExtensionEnabled) ||
         ![PXTargetKeychainFileStore()
         writeReadinessForBundleIdentifier:context.bundleIdentifier
-        profileID:context.profileID
         generationID:context.generationID
         now:[NSDate date]
         error:nil]) {

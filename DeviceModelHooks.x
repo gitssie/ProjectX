@@ -1,7 +1,6 @@
 #import "ProjectX.h"
 #import "DeviceModelManager.h"
 #import "IdentifierManager.h"
-#import "ProfileManager.h"
 #import "ProjectXLogging.h"
 #import "PXRootHidePath.h"
 #import "PXProcessHookPolicy.h"
@@ -65,23 +64,7 @@ static BOOL isDeviceModelSpoofingEnabled() {
         if (!manager || ![manager shouldSpoofForBundle:currentBundleID]) {
             shouldSpoof = NO;
         } else {
-            // Check if device model spoofing is specifically enabled
             shouldSpoof = [manager isIdentifierEnabled:@"DeviceModel"];
-            
-            // If the direct check fails, try profile settings directly
-            if (!shouldSpoof) {
-                // Try to get profile settings directly from file
-                NSString *profilesPath = PXProfilesDirectoryPath();
-                NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-                NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-                
-                NSString *profileId = centralInfo[@"ProfileId"];
-                if (profileId) {
-                    NSString *profileSettingsPath = [profilesPath stringByAppendingPathComponent:[profileId stringByAppendingPathComponent:@"settings.plist"]];
-                    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:profileSettingsPath];
-                    shouldSpoof = [settings[@"deviceModelEnabled"] boolValue];
-                }
-            }
         }
     } @catch (NSException *exception) {
         PXLog(@"[model] Exception checking if device model spoofing is enabled: %@", exception);
@@ -100,6 +83,25 @@ static BOOL isDeviceModelSpoofingEnabled() {
 // Cache for device model values
 static NSMutableDictionary *modelCache = nil;
 static NSDate *cacheTimestamp = nil;
+
+static void PXRefreshDeviceModelCaches(CFNotificationCenterRef center,
+                                      void *observer,
+                                      CFStringRef name,
+                                      const void *object,
+                                      CFDictionaryRef userInfo) {
+    (void)center;
+    (void)observer;
+    (void)name;
+    (void)object;
+    (void)userInfo;
+    @synchronized(cachedBundleDecisions) {
+        [cachedBundleDecisions removeAllObjects];
+    }
+    @synchronized(modelCache) {
+        [modelCache removeAllObjects];
+        cacheTimestamp = nil;
+    }
+}
 
 // Get the spoofed device model more reliably
 static NSString* getSpoofedDeviceModel() {
@@ -121,46 +123,11 @@ static NSString* getSpoofedDeviceModel() {
         }
     }
     
-    // Try multiple methods to get the model value, with better error handling
+    // Read only the generated model stored in current_profile.plist.
     NSString *deviceModel = nil;
     @try {
-        // METHOD 1: Try direct access from profile plist for highest reliability
-        // First get current profile ID
-        NSString *profilesPath = PXProfilesDirectoryPath();
-        NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-        
-        NSString *profileId = centralInfo[@"ProfileId"];
-        if (profileId) {
-            // Get the model value from settings.plist in the profile directory
-            NSString *settingsPath = [profilesPath stringByAppendingPathComponent:[profileId stringByAppendingPathComponent:@"settings.plist"]];
-            NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:settingsPath];
-            deviceModel = settings[@"deviceModel"];
-            
-            if (deviceModel.length > 0) {
-                PXLog(@"[model] Found device model %@ directly in profile %@ settings", deviceModel, profileId);
-            }
-        }
-        
-        // METHOD 2: Use IdentifierManager if direct file access failed
-        if (!deviceModel.length && NSClassFromString(@"IdentifierManager")) {
-            IdentifierManager *manager = [NSClassFromString(@"IdentifierManager") sharedManager];
-            deviceModel = [manager currentValueForIdentifier:@"DeviceModel"];
-            
-            if (deviceModel.length > 0) {
-                PXLog(@"[model] Found device model %@ via IdentifierManager", deviceModel);
-            }
-        }
-        
-        // METHOD 3: Use DeviceModelManager as last resort
-        if (!deviceModel.length && NSClassFromString(@"DeviceModelManager")) {
-            DeviceModelManager *deviceManager = [NSClassFromString(@"DeviceModelManager") sharedManager];
-            deviceModel = [deviceManager currentDeviceModel] ?: [deviceManager generateDeviceModel];
-            
-            if (deviceModel.length > 0) {
-                PXLog(@"[model] Using model %@ from DeviceModelManager", deviceModel);
-            }
-        }
+        NSDictionary *deviceModelValue = PXCurrentProfileValue(@"identity/device_model.plist");
+        deviceModel = deviceModelValue[@"value"];
         
         // If we got a model, cache it for this bundle ID
         if (deviceModel.length > 0) {
@@ -169,7 +136,7 @@ static NSString* getSpoofedDeviceModel() {
                 cacheTimestamp = [NSDate date];
             }
         } else {
-            PXLog(@"[model] WARNING: Failed to get device model through any method");
+            PXLog(@"[model] No generated device model in current_profile.plist");
         }
         
         return deviceModel;
@@ -192,15 +159,12 @@ static NSString* getSpoofedBoardID() {
         }
         
         // METHOD 1: Try to get from device_ids.plist directly
-        NSString *profilesPath = PXProfilesDirectoryPath();
-        NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-        NSString *profileId = centralInfo[@"ProfileId"];
-        
-        if (profileId) {
-            NSString *identityDir = [profilesPath stringByAppendingPathComponent:profileId];
+        NSString *centralInfoPath = PXCurrentProfileInfoPath();
+        NSDictionary *centralInfo = PXProfileReadDictionary(centralInfoPath);
+        if (centralInfo) {
+            NSString *identityDir = PXCurrentProfileIdentityValuesPath();
             NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+            NSDictionary *deviceIds = PXProfileReadDictionary(deviceIdsPath);
             
             NSString *boardID = deviceIds[@"BoardID"];
             if (boardID.length > 0) {
@@ -240,15 +204,12 @@ static NSString* getSpoofedHWModel() {
         }
         
         // METHOD 1: Try to get from device_ids.plist directly
-        NSString *profilesPath = PXProfilesDirectoryPath();
-        NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-        NSString *profileId = centralInfo[@"ProfileId"];
-        
-        if (profileId) {
-            NSString *identityDir = [profilesPath stringByAppendingPathComponent:profileId];
+        NSString *centralInfoPath = PXCurrentProfileInfoPath();
+        NSDictionary *centralInfo = PXProfileReadDictionary(centralInfoPath);
+        if (centralInfo) {
+            NSString *identityDir = PXCurrentProfileIdentityValuesPath();
             NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+            NSDictionary *deviceIds = PXProfileReadDictionary(deviceIdsPath);
             
             NSString *hwModel = deviceIds[@"HwModel"];
             if (hwModel.length > 0) {
@@ -863,6 +824,15 @@ static void logDeviceModelAccess(const char* method, NSString* bundleID) {
             PXLog(@"[model] App %@ is not enabled for spoofing, not initializing hooks", currentBundleID);
             return;
         }
+
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                        NULL, PXRefreshDeviceModelCaches,
+                                        CFSTR("com.hydra.projectx.profileChanged"), NULL,
+                                        CFNotificationSuspensionBehaviorDeliverImmediately);
+        CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                        NULL, PXRefreshDeviceModelCaches,
+                                        CFSTR("com.hydra.projectx.settings.changed"), NULL,
+                                        CFNotificationSuspensionBehaviorDeliverImmediately);
         
         // Use our optimized check function for determining if this app should be hooked
         if (!isDeviceModelSpoofingEnabled()) {

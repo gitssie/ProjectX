@@ -233,7 +233,7 @@ static NSError *PXFailureReportError(NSInteger code, NSString *description) {
     if (![[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
         return nil;
     }
-    NSDictionary<NSString *, id> *propertyList = [NSDictionary dictionaryWithContentsOfFile:filePath];
+    NSDictionary<NSString *, id> *propertyList = PXProfileReadDictionary(filePath);
     NSArray *storedDiagnostics = [propertyList[@"diagnostics"] isKindOfClass:[NSArray class]]
         ? propertyList[@"diagnostics"]
         : nil;

@@ -88,19 +88,22 @@ NSDictionary<NSString *, id> *PXResolveEnvironmentModelSelection(
         return selectedModel;
     }
 
-    PXEnvironmentNetworkType selectedNetworkType = [policyStore
-        selectedNetworkTypeWithError:&policyError];
+    NSSet<NSNumber *> *selectedNetworkTypes = [policyStore
+        selectedNetworkTypesWithError:&policyError];
     if (policyError) {
         if (error) {
             *error = policyError;
         }
         return nil;
     }
-    BOOL physicalNetworkIsIncompatible =
-        selectedNetworkType != PXEnvironmentNetworkTypeUnspecified &&
-        !PXEnvironmentNetworkTypeIsCompatibleWithModelRecord(
-            selectedNetworkType,
-            physicalModelRecord);
+    BOOL physicalNetworkIsIncompatible = NO;
+    for (NSNumber *type in selectedNetworkTypes) {
+        if (!PXEnvironmentNetworkTypeIsCompatibleWithModelRecord(
+            (PXEnvironmentNetworkType)type.integerValue, physicalModelRecord)) {
+            physicalNetworkIsIncompatible = YES;
+            break;
+        }
+    }
     BOOL needsPersistence = selectionMode != PXEnvironmentModelSelectionModePhysicalDevice ||
         selectedIdentifier.length > 0 || physicalNetworkIsIncompatible;
     if (needsPersistence && ![policyStore savePhysicalDeviceModelRecord:physicalModelRecord

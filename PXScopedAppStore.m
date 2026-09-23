@@ -1,3 +1,4 @@
+#import "PXRootHidePath.h"
 #import "PXScopedAppStore.h"
 
 @interface PXScopedAppStore ()
@@ -25,7 +26,7 @@
         return @{};
     }
     NSDictionary<NSString *, id> *propertyList =
-        [NSDictionary dictionaryWithContentsOfFile:self.filePath];
+        PXProfileReadDictionary(self.filePath);
     NSDictionary<NSString *, NSDictionary<NSString *, id> *> *scopedApplications =
         [propertyList[@"ScopedApps"] isKindOfClass:[NSDictionary class]]
             ? propertyList[@"ScopedApps"]

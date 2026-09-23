@@ -185,10 +185,28 @@ static void testConfiguredFourGIdentityRejectsContradictoryOrMissingSignals(void
     }
 
     NSDictionary<NSString *, id> *fiveGNSA = PXNetworkSettingsByMerging(fourG, @{
-        @"configuredNetworkType": @"5g",
+        @"configuredNetworkType": @"5g-nr",
         @"radioTechnology": @"CTRadioAccessTechnologyNRNSA"
     });
     assert(PXNetworkIdentityIsCoherent(fiveGNSA));
+    assert(PXNetworkIdentityIsCoherent(PXNetworkSettingsByMerging(fiveGNSA, @{
+        @"configuredNetworkType": @"5g"
+    })));
+    NSDictionary<NSString *, id> *combined = PXNetworkSettingsByMerging(fiveGNSA, @{
+        @"configuredNetworkType": @"wifi",
+        @"configuredNetworkTypes": @[@"wifi", @"5g-nr", @"4g-lte"],
+        @"transport": @"wifi",
+        @"supportedRadioTechnologies": @[
+            @"CTRadioAccessTechnologyLTE", @"CTRadioAccessTechnologyNRNSA"
+        ]
+    });
+    assert(PXNetworkIdentityIsCoherent(combined));
+    assert(!PXNetworkIdentityIsCoherent(PXNetworkSettingsByMerging(combined, @{
+        @"configuredNetworkTypes": @[@"wifi", @"none"]
+    })));
+    assert(!PXNetworkIdentityIsCoherent(PXNetworkSettingsByMerging(combined, @{
+        @"radioTechnology": @"CTRadioAccessTechnologyEdge"
+    })));
 }
 
 int main(void) {

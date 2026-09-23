@@ -9,7 +9,6 @@
 #import "LocationSpoofingManager.h"
 #import "NetworkManager.h"
 #import "NetworkIdentity.h"
-#import "ProfileManager.h"
 #import "PXRootHidePath.h"
 #import "CarrierSelectionViewController.h"
 #import "TrustedCarrierPolicy.h"
@@ -1926,7 +1925,7 @@
     
     // 1. Update plist file - THE SOURCE OF TRUTH
     NSString *securitySettingsPath = PXSecuritySettingsPath();
-    NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
+    NSMutableDictionary *settingsDict = [PXProfileReadDictionary(securitySettingsPath) mutableCopy] ?: [NSMutableDictionary dictionary];
     settingsDict[@"networkDataSpoofEnabled"] = @(enabled);
     
     // Ensure the plist is written atomically and with proper permissions
@@ -2056,7 +2055,7 @@
 - (void)showProfileIndicatorInfo {
     UIAlertController *alert = [UIAlertController 
                                alertControllerWithTitle:@"Profile Indicator"
-                               message:@"Shows a floating indicator with your current profile number on screen at all times. This helps you always know which identity profile is active on your device. Also by tapping on it can open the app."
+                               message:@"Shows a floating ProjectX indicator on screen. Tap it to open the app."
                                preferredStyle:UIAlertControllerStyleAlert];
     
     UIAlertAction *okAction = [UIAlertAction 
@@ -3477,12 +3476,7 @@
 
 // Trusted-carrier presentation keeps technical catalog fields out of the UI.
 - (PXTrustedCarrierPolicyStore *)trustedCarrierPolicyStoreForCurrentProfile {
-    Profile *currentProfile = [ProfileManager sharedManager].currentProfile;
-    if (!currentProfile) {
-        return nil;
-    }
-    NSString *profileDirectory = [[ProfileManager sharedManager] profileDirectoryForProfile:currentProfile];
-    return [[PXTrustedCarrierPolicyStore alloc] initWithProfileDirectory:profileDirectory];
+    return [[PXTrustedCarrierPolicyStore alloc] init];
 }
 
 - (void)prepareTrustedCarrierSelectionForPresentation {
@@ -3841,7 +3835,7 @@
     // 3. Then check plist file directly
     if (!toggleEnabled) {
         NSString *securitySettingsPath = PXSecuritySettingsPath();
-        NSDictionary *settingsDict = [NSDictionary dictionaryWithContentsOfFile:securitySettingsPath];
+        NSDictionary *settingsDict = PXProfileReadDictionary(securitySettingsPath);
         if (settingsDict) {
             toggleEnabled = [settingsDict[@"canvasFingerprintingEnabled"] boolValue] || 
                            [settingsDict[@"CanvasFingerprint"] boolValue];
@@ -3964,7 +3958,7 @@
     
     // ONLY update the plist file - THE SINGLE SOURCE OF TRUTH
     NSString *securitySettingsPath = PXSecuritySettingsPath();
-    NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
+    NSMutableDictionary *settingsDict = [PXProfileReadDictionary(securitySettingsPath) mutableCopy] ?: [NSMutableDictionary dictionary];
     settingsDict[@"canvasFingerprintingEnabled"] = @(enabled);
     settingsDict[@"CanvasFingerprint"] = @(enabled); // Also use old key for compatibility
     

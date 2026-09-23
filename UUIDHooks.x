@@ -3,8 +3,7 @@
 #import <objc/runtime.h>
 #import "ProjectXLogging.h"
 #import "IdentifierManager.h"
-#import "SystemUUIDManager.h"
-#import "DyldCacheUUIDManager.h"
+#import "ProfileManifest.h"
 #import "PXRootHidePath.h"
 #import "PXProcessHookPolicy.h"
 #import "PXSysctlHookRouter.h"
@@ -113,7 +112,7 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
         }
         
         if (scopedAppsFilePath) {
-            NSDictionary *scopedAppsDict = [NSDictionary dictionaryWithContentsOfFile:scopedAppsFilePath];
+            NSDictionary *scopedAppsDict = PXProfileReadDictionary(scopedAppsFilePath);
             NSDictionary *scopedApps = scopedAppsDict[@"ScopedApps"];
             
             if (scopedApps && scopedApps[bundleID]) {
@@ -150,7 +149,7 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
         }
         
         if (settingsFilePath) {
-            NSDictionary *settingsDict = [NSDictionary dictionaryWithContentsOfFile:settingsFilePath];
+            NSDictionary *settingsDict = PXProfileReadDictionary(settingsFilePath);
             NSDictionary *enabledIdentifiers = settingsDict[@"EnabledIdentifiers"];
             
             if (enabledIdentifiers) {
@@ -207,7 +206,7 @@ static BOOL isDyldCacheUUIDEnabled() {
     for (NSString *prefsPath in preferencesLocations) {
         NSString *settingsPath = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
         if ([fileManager fileExistsAtPath:settingsPath]) {
-            NSDictionary *settingsDict = [NSDictionary dictionaryWithContentsOfFile:settingsPath];
+            NSDictionary *settingsDict = PXProfileReadDictionary(settingsPath);
             NSDictionary *enabledIdentifiers = settingsDict[@"EnabledIdentifiers"];
             
             if (enabledIdentifiers) {
@@ -222,172 +221,20 @@ static BOOL isDyldCacheUUIDEnabled() {
     return NO;
 }
 
-// Add functions to get spoofed UUIDs from managers
+// Read validated values from the single active Profile generation.
+static PXProfileManifest *PXCurrentUUIDHookManifest(void) {
+    PXProfileStore *store = [[PXProfileStore alloc]
+        initWithIdentityDirectory:PXCurrentProfileIdentityValuesPath()];
+    return [store activeManifestWithError:nil];
+}
+
 static NSString *getSpoofedSystemBootUUID() {
-    @try {
-        SystemUUIDManager *manager = [SystemUUIDManager sharedManager];
-        NSString *uuid = nil;
-        
-        // Try to read directly from plist files
-        IdentifierManager *idManager = [NSClassFromString(@"IdentifierManager") sharedManager];
-        if (!idManager) {
-            return @"00000000-0000-4000-8000-000000000000";
-        }
-        
-        NSString *identityDir = [idManager profileIdentityPath];
-        
-        if (identityDir) {
-            // First try the combined device_ids.plist
-            NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-            NSString *value = deviceIds[@"SystemBootUUID"];
-            
-            if (value && value.length > 0 && ![value isEqualToString:@"(null)"]) {
-                // Basic validation for UUID format
-                NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
-                                                                                        options:NSRegularExpressionCaseInsensitive 
-                                                                                          error:nil];
-                if ([regex numberOfMatchesInString:value 
-                                           options:0 
-                                             range:NSMakeRange(0, value.length)] > 0) {
-                    PXLog(@"[WeaponX] 🔄 Got SystemBootUUID from device_ids.plist: %@", value);
-                    // Update the manager for future consistency
-                    if ([manager respondsToSelector:@selector(setCurrentBootUUID:)]) {
-                        [manager setCurrentBootUUID:value];
-                    }
-                    return value;
-                }
-            }
-            
-            // Try the specific uuid file
-            NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"system_boot_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-            if (uuidDict && uuidDict[@"value"] && [uuidDict[@"value"] length] > 0 && ![uuidDict[@"value"] isEqualToString:@"(null)"]) {
-                // Validate UUID format
-                NSString *uuidValue = uuidDict[@"value"];
-                NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
-                                                                                        options:NSRegularExpressionCaseInsensitive 
-                                                                                          error:nil];
-                if ([regex numberOfMatchesInString:uuidValue 
-                                           options:0 
-                                             range:NSMakeRange(0, uuidValue.length)] > 0) {
-                    PXLog(@"[WeaponX] 🔄 Got SystemBootUUID from system_boot_uuid.plist: %@", uuidValue);
-                    // Update the manager for future consistency
-                    if ([manager respondsToSelector:@selector(setCurrentBootUUID:)]) {
-                        [manager setCurrentBootUUID:uuidValue];
-                    }
-                    return uuidValue;
-                }
-            }
-        }
-        
-        // Fail closed with a non-host UUID if the active session is unavailable.
-        uuid = @"00000000-0000-4000-8000-000000000000";
-        PXLog(@"[WeaponX] ⚠️ Active virtual Boot UUID unavailable; using host-safe sentinel");
-        
-        // Store this for future consistency
-        if ([manager respondsToSelector:@selector(setCurrentBootUUID:)]) {
-            [manager setCurrentBootUUID:uuid];
-        }
-        
-        return uuid;
-    } @catch (NSException *exception) {
-        PXLog(@"[WeaponX] ❌ Exception in getSpoofedSystemBootUUID: %@", exception);
-        return @"00000000-0000-4000-8000-000000000000";
-    }
+    return PXCurrentUUIDHookManifest().virtualSession.bootUUID;
 }
 
 static NSString *getSpoofedDyldCacheUUID() {
-    @try {
-        // Use the DyldCacheUUIDManager for consistent values across the app and hooks
-        DyldCacheUUIDManager *manager = [DyldCacheUUIDManager sharedManager];
-        if (!manager) {
-            // Generate a safer fallback if manager is unavailable
-            return [[NSUUID UUID] UUIDString];
-        }
-        
-        NSString *uuid = [manager currentDyldCacheUUID];
-        
-        // Validate UUID format
-        if (uuid && uuid.length > 0 && ![uuid isEqualToString:@"(null)"]) {
-            // Check if it's a valid UUID format (basic validation)
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
-                                                                                    options:NSRegularExpressionCaseInsensitive 
-                                                                                      error:nil];
-            if ([regex numberOfMatchesInString:uuid 
-                                       options:0 
-                                         range:NSMakeRange(0, uuid.length)] > 0) {
-                return uuid;
-            }
-        }
-        
-        // Try to read directly from plist files
-        IdentifierManager *idManager = [NSClassFromString(@"IdentifierManager") sharedManager];
-        if (!idManager) {
-            return [[NSUUID UUID] UUIDString];
-        }
-        
-        NSString *identityDir = [idManager valueForKey:@"profileIdentityPath"];
-        
-        if (identityDir) {
-            // First try the combined device_ids.plist
-            NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-            NSString *value = deviceIds[@"DyldCacheUUID"];
-            
-            if (value && value.length > 0 && ![value isEqualToString:@"(null)"]) {
-                // Basic validation for UUID format
-                NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
-                                                                                        options:NSRegularExpressionCaseInsensitive 
-                                                                                          error:nil];
-                if ([regex numberOfMatchesInString:value 
-                                           options:0 
-                                             range:NSMakeRange(0, value.length)] > 0) {
-                    PXLog(@"[WeaponX] 🔄 Got DyldCacheUUID from device_ids.plist: %@", value);
-                    // Update the manager for future consistency
-                    if ([manager respondsToSelector:@selector(setCurrentDyldCacheUUID:)]) {
-                        [manager setCurrentDyldCacheUUID:value];
-                    }
-                    return value;
-                }
-            }
-            
-            // Try the specific uuid file
-            NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"dyld_cache_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-            if (uuidDict && uuidDict[@"value"] && [uuidDict[@"value"] length] > 0 && ![uuidDict[@"value"] isEqualToString:@"(null)"]) {
-                // Validate UUID format
-                NSString *uuidValue = uuidDict[@"value"];
-                NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
-                                                                                        options:NSRegularExpressionCaseInsensitive 
-                                                                                          error:nil];
-                if ([regex numberOfMatchesInString:uuidValue 
-                                           options:0 
-                                             range:NSMakeRange(0, uuidValue.length)] > 0) {
-                    PXLog(@"[WeaponX] 🔄 Got DyldCacheUUID from dyld_cache_uuid.plist: %@", uuidValue);
-                    // Update the manager for future consistency
-                    if ([manager respondsToSelector:@selector(setCurrentDyldCacheUUID:)]) {
-                        [manager setCurrentDyldCacheUUID:uuidValue];
-                    }
-                    return uuidValue;
-                }
-            }
-        }
-        
-        // If we still don't have a UUID, generate a new one rather than using zeros
-        uuid = [[NSUUID UUID] UUIDString];
-        PXLog(@"[WeaponX] 🔄 Generated fallback UUID: %@", uuid);
-        
-        // Store this for future consistency
-        if ([manager respondsToSelector:@selector(setCurrentDyldCacheUUID:)]) {
-            [manager setCurrentDyldCacheUUID:uuid];
-        }
-        
-        return uuid;
-    } @catch (NSException *exception) {
-        PXLog(@"[WeaponX] ❌ Exception in getSpoofedDyldCacheUUID: %@", exception);
-        return [[NSUUID UUID] UUIDString];
-    }
+    NSString *value = PXCurrentUUIDHookManifest().identifiers[@"dyldCacheUUID"];
+    return [[NSUUID alloc] initWithUUIDString:value] ? value : nil;
 }
 
 #pragma mark - NSUUID Hooks
@@ -672,42 +519,11 @@ static bool replaced_dyld_get_shared_cache_uuid(uuid_t uuid_out) {
             return false;
         }
         
-        // Get the UUID from the manager to ensure we're consistent with other hooks
-        DyldCacheUUIDManager *manager = [DyldCacheUUIDManager sharedManager];
-        NSString *dyldUUID = [manager currentDyldCacheUUID];
-        
-        // If we got a valid UUID, use it
-        if (dyldUUID && dyldUUID.length > 0) {
-            // Parse UUID string
-            NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:dyldUUID];
-            if (uuid) {
-                [uuid getUUIDBytes:uuid_out];
-                
-                // Only log occasionally to reduce spam
-                static NSTimeInterval lastLogTime = 0;
-                NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-                if (now - lastLogTime > 5.0) { // Log at most every 5 seconds
-                    PXLog(@"[WeaponX] 🔄 Spoofing Dyld Cache UUID with: %@", dyldUUID);
-                    lastLogTime = now;
-                }
-                
-                return true;
-            }
-        }
-        
-        // Fallback: try to get a new UUID if the manager didn't have one
-        dyldUUID = getSpoofedDyldCacheUUID();
-        if (dyldUUID && dyldUUID.length > 0) {
-            NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:dyldUUID];
-            if (uuid) {
-                [uuid getUUIDBytes:uuid_out];
-                
-                // Update the manager with this UUID for future consistency
-                [manager setCurrentDyldCacheUUID:dyldUUID];
-                
-                PXLog(@"[WeaponX] 🔄 Spoofing Dyld Cache UUID (fallback) with: %@", dyldUUID);
-                return true;
-            }
+        NSString *dyldUUID = getSpoofedDyldCacheUUID();
+        NSUUID *uuid = dyldUUID ? [[NSUUID alloc] initWithUUIDString:dyldUUID] : nil;
+        if (uuid) {
+            [uuid getUUIDBytes:uuid_out];
+            return true;
         }
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in replaced_dyld_get_shared_cache_uuid: %@", exception);
@@ -790,19 +606,9 @@ static const struct dyld_all_image_infos* replaced_dyld_get_all_image_infos(void
             // The compiler warns about comparing sharedCacheUUID with NULL because it's an array pointer
             // Instead, we'll check if the version is high enough to safely access this field
             if (isDyldCacheUUIDEnabled() && original->version >= 15) {
-                // Using per-bundle caching to ensure consistent but unique UUIDs across apps
-                DyldCacheUUIDManager *manager = [DyldCacheUUIDManager sharedManager];
-                NSString *dyldUUID = [manager currentDyldCacheUUID];
-                
-                if (!dyldUUID || dyldUUID.length == 0) {
-                    // If no UUID is available, try to get one from the manager
-                    dyldUUID = getSpoofedDyldCacheUUID();
-                    if (!dyldUUID || dyldUUID.length == 0) {
-                        // Fall back to original if we can't get a valid UUID
-                        return original;
-                    }
-                }
-                
+                NSString *dyldUUID = getSpoofedDyldCacheUUID();
+                if (!dyldUUID) return original;
+
                 // Get thread-local storage for this image info
                 NSMutableDictionary *threadCache = threadLocalCaches();
                 NSString *cacheKey = [NSString stringWithFormat:@"image_info_%@", bundleID];

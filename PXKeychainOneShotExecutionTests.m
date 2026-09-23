@@ -225,7 +225,6 @@ static PXKeychainCommandRequest *PXTestFreshOneShotRequestIncludingSharedGroups(
     NSDate *now = [NSDate date];
     return [PXKeychainCommandRequest
         freshRequestForBundleIdentifier:@"com.example.target"
-        profileID:NSUUID.UUID.UUIDString
         generationID:NSUUID.UUID.UUIDString
         includeSharedAccessGroups:includeSharedAccessGroups
         includeSynchronizableItems:NO
@@ -241,7 +240,6 @@ static PXKeychainCommandRequest *PXTestFreshOneShotRequest(void) {
 static PXKeychainCommandContext *PXTestContextForRequest(PXKeychainCommandRequest *request) {
     return [[PXKeychainCommandContext alloc]
         initWithBundleIdentifier:request.targetBundleID
-        profileID:request.profileID
         generationID:request.generationID
         applicationEnabled:YES
         extensionEnabled:NO];

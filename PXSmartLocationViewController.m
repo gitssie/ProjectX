@@ -38,6 +38,8 @@
 @property (nonatomic, strong, nullable) PXGeoIPLocation *displayedLocation;
 @property (nonatomic, strong, nullable) PXGeoIPLocation *savedGeoIPLocation;
 @property (nonatomic, strong, nullable) PXGeoIPLocation *pendingLocation;
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *selectedLocationPolicy;
+@property (nonatomic, assign) BOOL pendingClear;
 @property (nonatomic, copy, nullable) NSString *detectedIPv4Address;
 @property (nonatomic, copy, nullable) NSString *detectedIPv6Address;
 @property (nonatomic, copy, nullable) NSString *legacyLocationAddress;
@@ -70,6 +72,12 @@
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
     self.environmentPolicyStore = [PXEnvironmentPolicyStore sharedStore];
     self.locationService = [[PXGeoIPLocationService alloc] init];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
+        initWithTitle:PXLocalizedString(@"image.network.confirm.title")
+                style:UIBarButtonItemStyleDone
+               target:self
+               action:@selector(handleConfirmTapped:)];
+    [self updateConfirmButtonState];
     [self buildLocationInterface];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(handleLanguagePreferenceChanged:)
@@ -317,6 +325,7 @@
 
 - (void)refreshLocalizedContent {
     self.title = PXLocalizedString(@"image.location.title");
+    self.navigationItem.rightBarButtonItem.title = PXLocalizedString(@"image.network.confirm.title");
     self.sectionLabel.text = PXLocalizedString(@"image.location.geo_ip.section");
     self.ipv4TitleLabel.text = PXLocalizedString(@"image.location.geo_ip.ipv4.label");
     self.ipv6TitleLabel.text = PXLocalizedString(@"image.location.geo_ip.ipv6.label");
@@ -354,7 +363,8 @@
     self.clearLocationButton.accessibilityHint = PXLocalizedString(@"image.location.clear.accessibility_hint");
 
     UIButtonConfiguration *useConfiguration = [UIButtonConfiguration filledButtonConfiguration];
-    useConfiguration.title = PXLocalizedString(@"image.location.use.title");
+    useConfiguration.title = PXLocalizedString(self.selectedLocationPolicy
+        ? @"image.location.selected.title" : @"image.location.use.title");
     useConfiguration.cornerStyle = UIButtonConfigurationCornerStyleLarge;
     useConfiguration.baseBackgroundColor = UIColor.systemBlueColor;
     useConfiguration.baseForegroundColor = UIColor.whiteColor;
@@ -363,7 +373,12 @@
         self.currentDetectionSucceeded && !self.loading;
     self.useLocationButton.accessibilityLabel = PXLocalizedString(@"image.location.use.accessibility_label");
     self.useLocationButton.accessibilityHint = PXLocalizedString(@"image.location.use.accessibility_hint");
+    [self updateConfirmButtonState];
     [self renderLocationState];
+}
+
+- (void)updateConfirmButtonState {
+    self.navigationItem.rightBarButtonItem.enabled = self.pendingClear || self.selectedLocationPolicy != nil;
 }
 
 - (void)renderLocationState {
@@ -425,6 +440,8 @@
 
 - (void)fetchCurrentGeoIPLocation {
     self.requestRevision += 1;
+    self.selectedLocationPolicy = nil;
+    [self updateConfirmButtonState];
     NSUInteger revision = self.requestRevision;
     [self.activeRequest cancel];
     for (NSURLSessionDataTask *task in self.activeAddressRequests) [task cancel];
@@ -515,40 +532,44 @@
 
 - (void)handleClearLocationTapped:(UIButton *)sender {
     (void)sender;
-    NSError *error = nil;
-    if (![self.environmentPolicyStore clearConfiguredLocationWithError:&error]) {
-        [self presentLocationError:error];
-        return;
-    }
+    self.pendingClear = YES;
+    self.selectedLocationPolicy = nil;
     self.hasStoredLocationConfiguration = NO;
     self.savedGeoIPLocation = nil;
     self.legacyLocationAddress = nil;
     [self refreshLocalizedContent];
-    [self notifyCommittedSummary:PXLocalizedString(@"image.location.address.cleared")];
-    UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,
-                                    PXLocalizedString(@"image.location.clear.announcement"));
 }
 
 - (void)handleUseLocationTapped:(UIButton *)sender {
     (void)sender;
     if (!self.displayedLocation || !self.currentDetectionSucceeded || self.loading) return;
-    NSError *error = nil;
-    NSDictionary<NSString *, id> *location = [self.displayedLocation
+    self.selectedLocationPolicy = [self.displayedLocation
         policyRepresentationWithIPv4Address:self.detectedIPv4Address
                               ipv6Address:self.detectedIPv6Address];
-    if (![self.environmentPolicyStore saveConfiguredLocation:location error:&error]) {
-        [self presentLocationError:error];
+    self.pendingClear = NO;
+    [self refreshLocalizedContent];
+}
+
+- (void)handleConfirmTapped:(UIBarButtonItem *)sender {
+    if (!sender.enabled) return;
+    NSError *error = nil;
+    if (self.pendingClear) {
+        if (![self.environmentPolicyStore clearConfiguredLocationWithError:&error]) {
+            [self presentLocationError:error];
+            return;
+        }
+        [self notifyCommittedSummary:PXLocalizedString(@"image.location.address.cleared")];
+    } else if (self.selectedLocationPolicy) {
+        if (![self.environmentPolicyStore saveConfiguredLocation:self.selectedLocationPolicy error:&error]) {
+            [self presentLocationError:error];
+            return;
+        }
+        [self notifyCommittedSummary:self.displayedLocation.address];
+    } else {
         return;
     }
-    self.hasStoredLocationConfiguration = YES;
-    self.savedGeoIPLocation = [PXGeoIPLocation locationWithPolicyRepresentation:location error:nil];
-    self.legacyLocationAddress = nil;
-    [self refreshLocalizedContent];
-    [self notifyCommittedSummary:self.displayedLocation.address];
     UINotificationFeedbackGenerator *feedback = [[UINotificationFeedbackGenerator alloc] init];
     [feedback notificationOccurred:UINotificationFeedbackTypeSuccess];
-    UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,
-                                    PXLocalizedString(@"image.location.use.announcement"));
     [self.navigationController popViewControllerAnimated:YES];
 }
 
@@ -576,16 +597,12 @@
 }
 
 - (void)updateCarrierMismatchWarningForLocation:(PXGeoIPLocation *)location {
-    NSDictionary *profileInfo = [NSDictionary dictionaryWithContentsOfFile:PXCurrentProfileInfoPath()];
-    NSString *profileID = [profileInfo[@"ProfileId"] isKindOfClass:[NSString class]]
-        ? profileInfo[@"ProfileId"] : nil;
-    if (profileID.length == 0 || ![profileID isEqualToString:profileID.lastPathComponent] ||
-        location.countryCode.length == 0) {
+    NSDictionary *profileInfo = PXProfileReadDictionary(PXCurrentProfileInfoPath());
+    if (!profileInfo || location.countryCode.length == 0) {
         self.mismatchRow.hidden = YES;
         return;
     }
-    PXTrustedCarrierPolicyStore *store = [[PXTrustedCarrierPolicyStore alloc]
-        initWithProfileDirectory:PXProfileDirectoryPath(profileID)];
+    PXTrustedCarrierPolicyStore *store = [[PXTrustedCarrierPolicyStore alloc] init];
     NSString *carrierID = [store selectedCarrierIDWithError:nil];
     NSString *carrierCountryCode = nil;
     for (NSDictionary<NSString *, id> *carrier in PXCarrierCatalog()) {

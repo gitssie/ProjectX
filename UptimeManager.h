@@ -7,25 +7,15 @@ NS_ASSUME_NONNULL_BEGIN
 // Singleton accessor
 + (instancetype)sharedManager;
 
-// System Uptime Generation (legacy)
+// System Uptime Generation
 - (NSString *)generateUptime;
 - (NSTimeInterval)currentUptime;
 - (void)setCurrentUptime:(NSTimeInterval)uptime;
 
-// Boot Time Generation (legacy)
+// Boot Time Generation
 - (NSString *)generateBootTime;
-- (NSDate *)currentBootTime;
+- (nullable NSDate *)currentBootTime;
 - (void)setCurrentBootTime:(NSDate *)bootTime;
-
-// New profile-specific methods
-- (NSString *)generateUptimeForProfile:(NSString *)profilePath;
-- (NSTimeInterval)currentUptimeForProfile:(NSString *)profilePath;
-- (NSString *)generateBootTimeForProfile:(NSString *)profilePath;
-- (NSDate *)currentBootTimeForProfile:(NSString *)profilePath;
-- (void)generateConsistentUptimeAndBootTimeForProfile:(NSString *)profilePath;
-
-// Data validation
-- (BOOL)validateBootTimeConsistencyForProfile:(NSString *)profilePath;
 
 // Error handling
 @property (nonatomic, readonly) NSError *lastError;

@@ -75,7 +75,6 @@ static CFStringRef (*orig_WiFiNetworkGetBSSID)(WiFiNetworkRef network);
 
 // Cache of WiFi info from the most recent successful lookup
 static NSMutableDictionary *cachedWifiInfo = nil;
-static NSString *cachedProfileId = nil;
 static NSDate *cacheTimestamp = nil;
 static NSMutableDictionary *cachedBundleDecisions = nil;
 static NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes in seconds
@@ -114,162 +113,16 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
     return isScoped;
 }
 
-// Helper function to directly get current profile ID from plist
-static NSString *getCurrentProfileID(void) {
-    // Direct access to the current profile info plist
-    NSString *centralInfoPath = PXCurrentProfileInfoPath();
-    NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-    
-    NSString *profileId = centralInfo[@"ProfileId"];
-    if (profileId) {
-        return profileId;
-    }
-    
-    // Fallback to legacy location if needed
-    NSString *legacyInfoPath = PXActiveProfileInfoPath();
-    NSDictionary *legacyInfo = [NSDictionary dictionaryWithContentsOfFile:legacyInfoPath];
-    profileId = legacyInfo[@"ProfileId"];
-    
-    if (profileId) {
-        return profileId;
-    }
-    
-    // Last resort - scan for profiles
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *profilesDir = PXProfilesDirectoryPath();
-    NSError *error = nil;
-    NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
-    
-    if (!error && contents.count > 0) {
-        // Find the first numeric directory
-        for (NSString *item in contents) {
-            if ([item isEqualToString:@"profiles.plist"] || 
-                [item isEqualToString:@"current_profile_info.plist"]) {
-                continue;
-            }
-            
-            BOOL isDir = NO;
-            NSString *fullPath = [profilesDir stringByAppendingPathComponent:item];
-            [fileManager fileExistsAtPath:fullPath isDirectory:&isDir];
-            
-            if (isDir) {
-                profileId = item;
-                break;
-            }
-        }
-    }
-    
-    return profileId ?: @"default";
-}
-
-// Get current WiFi info from appropriate profile
 static NSDictionary *getProfileWiFiInfo(void) {
-    // Skip cache if it's more than 5 minutes old
-    BOOL shouldRefresh = NO;
-    if (!cacheTimestamp || [[NSDate date] timeIntervalSinceDate:cacheTimestamp] > kCacheValidityDuration) {
-        shouldRefresh = YES;
-    }
-    
-    // Get current profile ID (use cache if available)
-    NSString *profileId = cachedProfileId;
-    if (!profileId || shouldRefresh) {
-        profileId = getCurrentProfileID();
-        cachedProfileId = profileId;
-        cacheTimestamp = [NSDate date];
-    }
-    
-    if (!profileId) {
-        return nil;
-    }
-    
-    // If cache is valid and we have WiFi info, return it
-    if (!shouldRefresh && cachedWifiInfo && cachedWifiInfo[@"ssid"] && cachedWifiInfo[@"bssid"]) {
-        return cachedWifiInfo;
-    }
-    
-    // Build path to WiFi info file in profile directory
-    NSString *profileDir = PXProfileDirectoryPath(profileId);
-    NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
-    NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
-    NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-    
-    // First try wifi_info.plist
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if ([fileManager fileExistsAtPath:wifiInfoPath]) {
-        NSDictionary *wifiInfo = [NSDictionary dictionaryWithContentsOfFile:wifiInfoPath];
-        if (wifiInfo && wifiInfo[@"ssid"] && wifiInfo[@"bssid"]) {
-            return wifiInfo;
-        }
-    }
-    
-    // Then try device_ids.plist
-    if ([fileManager fileExistsAtPath:deviceIdsPath]) {
-        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-        if (deviceIds[@"SSID"] && deviceIds[@"BSSID"]) {
-            NSMutableDictionary *wifiInfo = [NSMutableDictionary dictionary];
-            wifiInfo[@"ssid"] = deviceIds[@"SSID"];
-            wifiInfo[@"bssid"] = deviceIds[@"BSSID"];
-            wifiInfo[@"networkType"] = @"Infrastructure";
-            
-            return wifiInfo;
-        }
-        
-        // If WiFi value is stored as a formatted string
-        NSString *wifiValue = deviceIds[@"WiFi"];
-        if (wifiValue && [wifiValue containsString:@"("]) {
-            NSRange openParenRange = [wifiValue rangeOfString:@"("];
-            NSRange closeParenRange = [wifiValue rangeOfString:@")"];
-            
-            if (openParenRange.location != NSNotFound && closeParenRange.location != NSNotFound) {
-                NSString *ssid = [wifiValue substringToIndex:openParenRange.location - 1];
-                NSString *bssid = [wifiValue substringWithRange:NSMakeRange(openParenRange.location + 1, 
-                                                                closeParenRange.location - openParenRange.location - 1)];
-                
-                NSMutableDictionary *wifiInfo = [NSMutableDictionary dictionary];
-                wifiInfo[@"ssid"] = ssid;
-                wifiInfo[@"bssid"] = bssid;
-                wifiInfo[@"networkType"] = @"Infrastructure";
-                
-                return wifiInfo;
-            }
-        }
-    }
-    
-    // Fallback - try to get from WiFiManager if available
-    if (NSClassFromString(@"WiFiManager")) {
-        id wifiManager = [NSClassFromString(@"WiFiManager") sharedManager];
-        if ([wifiManager respondsToSelector:@selector(currentWiFiInfo)]) {
-            NSDictionary *wifiInfo = [wifiManager currentWiFiInfo];
-            if (wifiInfo && wifiInfo[@"ssid"] && wifiInfo[@"bssid"]) {
-                return wifiInfo;
-            }
-        }
-        
-        // Generate new info if needed
-        if ([wifiManager respondsToSelector:@selector(generateWiFiInfo)]) {
-            NSDictionary *wifiInfo = [wifiManager generateWiFiInfo];
-            if (wifiInfo && wifiInfo[@"ssid"] && wifiInfo[@"bssid"]) {
-                // Save it to the profile for future use
-                if ([fileManager fileExistsAtPath:identityDir] || 
-                    [fileManager createDirectoryAtPath:identityDir withIntermediateDirectories:YES attributes:nil error:nil]) {
-                    [wifiInfo writeToFile:wifiInfoPath atomically:YES];
-                    
-                    // Also update device_ids.plist
-                    NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-                    if (!deviceIds) deviceIds = [NSMutableDictionary dictionary];
-                    deviceIds[@"SSID"] = wifiInfo[@"ssid"];
-                    deviceIds[@"BSSID"] = wifiInfo[@"bssid"];
-                    deviceIds[@"WiFi"] = [NSString stringWithFormat:@"%@ (%@)", wifiInfo[@"ssid"], wifiInfo[@"bssid"]];
-                    [deviceIds writeToFile:deviceIdsPath atomically:YES];
-                }
-                
-                return wifiInfo;
-            }
-        }
-    }
-    
-    // Return nil if all methods failed
-    return nil;
+    BOOL cacheValid = cachedWifiInfo && cacheTimestamp &&
+        [[NSDate date] timeIntervalSinceDate:cacheTimestamp] < kCacheValidityDuration;
+    if (cacheValid) return cachedWifiInfo;
+    NSDictionary *wifiInfo = PXCurrentProfileValue(@"identity/wifi_info.plist");
+    if (![wifiInfo[@"ssid"] isKindOfClass:[NSString class]] ||
+        ![wifiInfo[@"bssid"] isKindOfClass:[NSString class]]) return nil;
+    cachedWifiInfo = [wifiInfo mutableCopy];
+    cacheTimestamp = [NSDate date];
+    return cachedWifiInfo;
 }
 
 #pragma mark - Core Hook Functions
@@ -661,8 +514,6 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
         [cachedWifiInfo removeAllObjects];
     }
     
-    // Also reset profile ID cache to ensure we get the latest
-    cachedProfileId = nil;
     cacheTimestamp = nil;
 }
 
@@ -885,7 +736,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Load the plist file safely
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
+        NSDictionary *plistDict = PXProfileReadDictionary(validPath);
         if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
             scopedAppsCacheTimestamp = [NSDate date];
             return scopedAppsCache;

@@ -49,7 +49,7 @@ def test_ui_has_loading_retry_and_confirm_states() -> None:
     assert "image.location.geo_ip.legacy_preserved" in CONTROLLER
     assert "image.location.geo_ip.saved_preserved" in CONTROLLER
     assert "self.savedGeoIPLocation = location" in CONTROLLER
-    assert "self.savedGeoIPLocation = [PXGeoIPLocation locationWithPolicyRepresentation:location error:nil]" in CONTROLLER
+    assert "self.selectedLocationPolicy = [self.displayedLocation" in CONTROLLER
     assert "[self updateCarrierMismatchWarningForLocation:location]" in CONTROLLER
     assert "self.legacyLocationAddress = self.displayedLocation.address" not in CONTROLLER
 
@@ -82,17 +82,21 @@ def test_saved_ip_addresses_are_rendered_without_detection() -> None:
     assert "ipv6Address:self.detectedIPv6Address" in use_handler
 
 
-def test_using_location_returns_after_successful_save_only() -> None:
+def test_location_changes_commit_only_after_confirmation() -> None:
     use_handler = CONTROLLER.split("- (void)handleUseLocationTapped:", 1)[1].split(
+        "- (void)handleConfirmTapped:", 1
+    )[0]
+    clear_handler = CONTROLLER.split("- (void)handleClearLocationTapped:", 1)[1].split(
+        "- (void)handleUseLocationTapped:", 1
+    )[0]
+    confirm_handler = CONTROLLER.split("- (void)handleConfirmTapped:", 1)[1].split(
         "- (void)restoreConfiguredLocation {", 1
     )[0]
-    assert "saveConfiguredLocation:location error:&error" in use_handler
-    assert "[self presentLocationError:error];\n        return;" in use_handler
-    assert "[self notifyCommittedSummary:self.displayedLocation.address]" in use_handler
-    assert "[self.navigationController popViewControllerAnimated:YES]" in use_handler
-    assert use_handler.index("[self.navigationController popViewControllerAnimated:YES]") > use_handler.index(
-        "[self notifyCommittedSummary:self.displayedLocation.address]"
-    )
+    assert "saveConfiguredLocation" not in use_handler
+    assert "clearConfiguredLocation" not in clear_handler
+    assert "saveConfiguredLocation:self.selectedLocationPolicy" in confirm_handler
+    assert "clearConfiguredLocationWithError:&error" in confirm_handler
+    assert "[self.navigationController popViewControllerAnimated:YES]" in confirm_handler
 
 
 def test_manual_detection_requests_both_ip_families_and_uses_matching_geo_fallback() -> None:
@@ -130,7 +134,7 @@ if __name__ == "__main__":
     test_ui_has_loading_retry_and_confirm_states()
     test_entering_page_does_not_start_network_detection()
     test_saved_ip_addresses_are_rendered_without_detection()
-    test_using_location_returns_after_successful_save_only()
+    test_location_changes_commit_only_after_confirmation()
     test_manual_detection_requests_both_ip_families_and_uses_matching_geo_fallback()
     test_unified_card_keeps_actions_together_and_clear_is_a_real_button()
     print("Smart Location GEO IP regression tests passed.")

@@ -86,12 +86,13 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 }
 
 @protocol PXEnvironmentModelSelectorDelegate <NSObject>
-- (void)environmentModelSelector:(PXEnvironmentModelSelectorViewController *)viewController didSelectModelIdentifier:(NSString *)modelIdentifier;
-- (void)environmentModelSelectorDidSelectPhysicalDevice:(PXEnvironmentModelSelectorViewController *)viewController;
+- (BOOL)environmentModelSelector:(PXEnvironmentModelSelectorViewController *)viewController didConfirmModelIdentifier:(NSString *)modelIdentifier;
+- (BOOL)environmentModelSelectorDidConfirmPhysicalDevice:(PXEnvironmentModelSelectorViewController *)viewController;
 @end
 
 @protocol PXNetworkTypeSelectorDelegate <NSObject>
-- (void)networkTypeSelector:(PXNetworkTypeSelectorViewController *)viewController didSelectNetworkType:(PXEnvironmentNetworkType)networkType;
+- (BOOL)networkTypeSelector:(PXNetworkTypeSelectorViewController *)viewController
+    didConfirmNetworkTypes:(NSSet<NSNumber *> *)networkTypes;
 @end
 
 @interface PXEnvironmentModelSelectorViewController : UITableViewController <UISearchResultsUpdating>
@@ -105,7 +106,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 
 @interface PXNetworkTypeSelectorViewController : UITableViewController
 @property (nonatomic, weak) id<PXNetworkTypeSelectorDelegate> delegate;
-- (instancetype)initWithSelectedNetworkType:(PXEnvironmentNetworkType)selectedNetworkType
+- (instancetype)initWithSelectedNetworkTypes:(NSSet<NSNumber *> *)selectedNetworkTypes
                                  modelRecord:(nullable NSDictionary<NSString *, id> *)modelRecord
                                carrierRecord:(nullable NSDictionary<NSString *, id> *)carrierRecord;
 @end
@@ -121,7 +122,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *selectedModelRecord;
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *physicalModelRecord;
 @property (nonatomic, assign) BOOL usesPhysicalDeviceModel;
-@property (nonatomic, assign) PXEnvironmentNetworkType selectedNetworkType;
+@property (nonatomic, copy) NSSet<NSNumber *> *selectedNetworkTypes;
 @property (nonatomic, copy, nullable) NSString *selectedCarrierID;
 - (NSDictionary<NSString *, NSDictionary<NSString *, id> *> *)compatibilityPresentationByIdentifierForModelRecords:(NSArray<NSDictionary<NSString *, id> *> *)records
                                                                    physicalModelRecord:(NSDictionary<NSString *, id> *)physicalModelRecord;
@@ -132,6 +133,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = PXLocalizedString(@"image.settings.title");
+    self.navigationItem.backButtonTitle = PXLocalizedString(@"navigation.back");
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
     self.tableView.backgroundColor = UIColor.systemGroupedBackgroundColor;
@@ -152,6 +154,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 - (void)handleUILanguagePreferenceChanged:(NSNotification *)notification {
     (void)notification;
     self.title = PXLocalizedString(@"image.settings.title");
+    self.navigationItem.backButtonTitle = PXLocalizedString(@"navigation.back");
     self.tableView.accessibilityLabel = PXLocalizedString(@"image.settings.accessibility.list");
     [self reloadPendingConfigurationSummaries];
     if (self.view.window) {
@@ -178,7 +181,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     self.usesPhysicalDeviceModel = [self.environmentPolicyStore
         selectedModelSelectionModeWithError:&policyError] ==
         PXEnvironmentModelSelectionModePhysicalDevice;
-    self.selectedNetworkType = [self.environmentPolicyStore selectedNetworkTypeWithError:&policyError];
+    self.selectedNetworkTypes = [self.environmentPolicyStore selectedNetworkTypesWithError:&policyError];
     NSDictionary<NSString *, id> *location =
         [self.environmentPolicyStore configuredLocationWithError:&policyError];
     if (policyError) {
@@ -190,7 +193,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     self.modelSummary = self.usesPhysicalDeviceModel && selectedModelName.length > 0
         ? PXLocalizedFormat(@"image.model.use_this_device.summary", selectedModelName)
         : (selectedModelName ?: PXLocalizedString(@"image.summary.not_configured"));
-    self.networkSummary = [self localizedNetworkType:self.selectedNetworkType];
+    self.networkSummary = [self localizedNetworkTypes:self.selectedNetworkTypes];
     self.locationSummary = [location[@"address"] isKindOfClass:[NSString class]]
         ? location[@"address"]
         : PXLocalizedString(@"image.summary.not_configured");
@@ -222,14 +225,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 }
 
 - (nullable PXTrustedCarrierPolicyStore *)currentCarrierPolicyStore {
-    NSDictionary *profileInfo = [NSDictionary dictionaryWithContentsOfFile:PXCurrentProfileInfoPath()];
-    NSString *profileID = [profileInfo[@"ProfileId"] isKindOfClass:[NSString class]]
-        ? profileInfo[@"ProfileId"]
-        : nil;
-    if (profileID.length == 0 || ![profileID isEqualToString:profileID.lastPathComponent]) {
-        return nil;
-    }
-    return [[PXTrustedCarrierPolicyStore alloc] initWithProfileDirectory:PXProfileDirectoryPath(profileID)];
+    return [[PXTrustedCarrierPolicyStore alloc] init];
 }
 
 - (nullable NSDictionary<NSString *, id> *)carrierRecordForIdentifier:(NSString *)carrierID {
@@ -408,7 +404,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 
 - (void)handleNetworkTapped {
     PXNetworkTypeSelectorViewController *controller = [[PXNetworkTypeSelectorViewController alloc]
-        initWithSelectedNetworkType:self.selectedNetworkType
+        initWithSelectedNetworkTypes:self.selectedNetworkTypes
         modelRecord:self.selectedModelRecord
         carrierRecord:[self carrierRecordForIdentifier:self.selectedCarrierID]];
     controller.delegate = self;
@@ -451,7 +447,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     [self.tableView reloadData];
 }
 
-- (void)environmentModelSelector:(PXEnvironmentModelSelectorViewController *)viewController didSelectModelIdentifier:(NSString *)modelIdentifier {
+- (BOOL)environmentModelSelector:(PXEnvironmentModelSelectorViewController *)viewController didConfirmModelIdentifier:(NSString *)modelIdentifier {
     NSDictionary<NSString *, id> *selectedRecord = nil;
     for (NSDictionary<NSString *, id> *record in [DeviceModelManager.sharedManager allDeviceSpecificationRecords]) {
         if ([record[@"identifier"] isEqualToString:modelIdentifier]) {
@@ -467,12 +463,13 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
         hostGraphicsCapabilities:PXCurrentGraphicsHostCapabilities()
         error:&error]) {
         [self presentPolicyError:error ?: [NSError errorWithDomain:PXEnvironmentPolicyErrorDomain code:1 userInfo:nil]];
-        return;
+        return NO;
     }
     [self reloadPendingConfigurationSummaries];
+    return YES;
 }
 
-- (void)environmentModelSelectorDidSelectPhysicalDevice:(PXEnvironmentModelSelectorViewController *)viewController {
+- (BOOL)environmentModelSelectorDidConfirmPhysicalDevice:(PXEnvironmentModelSelectorViewController *)viewController {
     NSError *error = nil;
     NSDictionary<NSString *, id> *physicalModelRecord =
         [DeviceModelManager.sharedManager physicalDeviceSpecificationRecord];
@@ -483,23 +480,26 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
             errorWithDomain:PXEnvironmentModelSelectionErrorDomain
                        code:1
                    userInfo:nil]];
-        return;
+        return NO;
     }
     [self reloadPendingConfigurationSummaries];
     UIAccessibilityPostNotification(
         UIAccessibilityAnnouncementNotification,
         PXLocalizedString(@"image.model.use_this_device.selected_announcement"));
+    return YES;
 }
 
-- (void)networkTypeSelector:(PXNetworkTypeSelectorViewController *)viewController didSelectNetworkType:(PXEnvironmentNetworkType)networkType {
+- (BOOL)networkTypeSelector:(PXNetworkTypeSelectorViewController *)viewController
+    didConfirmNetworkTypes:(NSSet<NSNumber *> *)networkTypes {
     NSError *error = nil;
-    if (![self.environmentPolicyStore saveSelectedNetworkType:networkType
+    if (![self.environmentPolicyStore saveSelectedNetworkTypes:networkTypes
                                                    modelRecord:self.selectedModelRecord
                                                          error:&error]) {
         [self presentPolicyError:error];
-        return;
+        return NO;
     }
     [self reloadPendingConfigurationSummaries];
+    return YES;
 }
 
 - (void)carrierSelectionViewController:(CarrierSelectionViewController *)viewController didCommitSelectedCarrierIDs:(NSSet<NSString *> *)selectedCarrierIDs {
@@ -531,7 +531,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 
 - (BOOL)carrierSelectionViewController:(CarrierSelectionViewController *)viewController canCommitSelectedCarrierID:(NSString *)selectedCarrierID {
     NSDictionary<NSString *, id> *carrier = [self carrierRecordForIdentifier:selectedCarrierID];
-    if (self.selectedNetworkType != PXEnvironmentNetworkType5GNR ||
+    if (![self.selectedNetworkTypes containsObject:@(PXEnvironmentNetworkType5GNR)] ||
         [self carrierRecordSupports5G:carrier]) {
         return YES;
     }
@@ -562,6 +562,15 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     return PXLocalizedString(keys[(NSUInteger)networkType]);
 }
 
+- (NSString *)localizedNetworkTypes:(NSSet<NSNumber *> *)networkTypes {
+    if (networkTypes.count == 0) return PXLocalizedString(@"image.summary.not_configured");
+    NSMutableArray<NSString *> *names = [NSMutableArray array];
+    for (NSString *identifier in PXEnvironmentNetworkTypeIdentifiers(networkTypes)) {
+        [names addObject:[self localizedNetworkType:PXEnvironmentNetworkTypeFromIdentifier(identifier)]];
+    }
+    return [names componentsJoinedByString:PXLocalizedString(@"image.network.summary.separator")];
+}
+
 @end
 
 @interface PXEnvironmentModelSelectorViewController ()
@@ -574,6 +583,8 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 @property (nonatomic, copy) NSDictionary<NSString *, id> *physicalModelRecord;
 @property (nonatomic, copy) NSDictionary<NSString *, NSDictionary<NSString *, id> *> *compatibilityPresentationByIdentifier;
 @property (nonatomic, assign) BOOL usesPhysicalDevice;
+@property (nonatomic, assign) BOOL originalUsesPhysicalDevice;
+@property (nonatomic, copy, nullable) NSString *originalSelectedIdentifier;
 @end
 
 @implementation PXEnvironmentModelSelectorViewController
@@ -605,6 +616,8 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
         _physicalModelRecord = [physicalModelRecord copy];
         _compatibilityPresentationByIdentifier = [compatibilityPresentationByIdentifier copy] ?: @{};
         _usesPhysicalDevice = usesPhysicalDevice;
+        _originalUsesPhysicalDevice = usesPhysicalDevice;
+        _originalSelectedIdentifier = [selectedIdentifier copy];
     }
     return self;
 }
@@ -620,11 +633,18 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
+    self.searchController.automaticallyShowsCancelButton = NO;
     self.searchController.searchBar.placeholder = PXLocalizedString(@"image.model.search.placeholder");
     self.searchController.searchBar.accessibilityLabel = PXLocalizedString(@"image.model.search.accessibility_label");
     self.searchController.searchBar.accessibilityIdentifier = @"image-model-search";
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
+        initWithTitle:PXLocalizedString(@"image.network.confirm.title")
+                style:UIBarButtonItemStyleDone
+               target:self
+               action:@selector(handleConfirmTapped:)];
+    [self updateConfirmButtonState];
     self.definesPresentationContext = YES;
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(handleLanguagePreferenceChanged:)
@@ -645,6 +665,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     self.tableView.accessibilityLabel = PXLocalizedString(@"image.model.accessibility.list");
     self.searchController.searchBar.placeholder = PXLocalizedString(@"image.model.search.placeholder");
     self.searchController.searchBar.accessibilityLabel = PXLocalizedString(@"image.model.search.accessibility_label");
+    self.navigationItem.rightBarButtonItem.title = PXLocalizedString(@"image.network.confirm.title");
     [self rebuildVisibleRecordsForQuery:self.searchController.searchBar.text ?: @""];
     if (self.view.window) {
         UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, self.tableView);
@@ -654,6 +675,22 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
     NSString *query = [searchController.searchBar.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     [self rebuildVisibleRecordsForQuery:query];
+}
+
+- (void)updateConfirmButtonState {
+    BOOL changed = self.usesPhysicalDevice != self.originalUsesPhysicalDevice ||
+        (!self.usesPhysicalDevice && ![self.selectedIdentifier isEqualToString:self.originalSelectedIdentifier]);
+    self.navigationItem.rightBarButtonItem.enabled = changed;
+}
+
+- (void)handleConfirmTapped:(UIBarButtonItem *)sender {
+    if (!sender.enabled) return;
+    BOOL saved = self.usesPhysicalDevice
+        ? [self.delegate environmentModelSelectorDidConfirmPhysicalDevice:self]
+        : [self.delegate environmentModelSelector:self didConfirmModelIdentifier:self.selectedIdentifier];
+    if (!saved) return;
+    self.searchController.active = NO;
+    [self.navigationController popViewControllerAnimated:YES];
 }
 
 - (void)rebuildVisibleRecordsForQuery:(NSString *)query {
@@ -722,7 +759,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     (void)action;
     self.usesPhysicalDevice = YES;
     self.selectedIdentifier = nil;
-    [self.delegate environmentModelSelectorDidSelectPhysicalDevice:self];
+    [self updateConfirmButtonState];
     [self.tableView reloadData];
 }
 
@@ -871,7 +908,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     if (indexPath.section == 0) {
         self.usesPhysicalDevice = YES;
         self.selectedIdentifier = nil;
-        [self.delegate environmentModelSelectorDidSelectPhysicalDevice:self];
+        [self updateConfirmButtonState];
         [self.tableView reloadData];
         return;
     }
@@ -891,23 +928,67 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     }
     self.usesPhysicalDevice = NO;
     self.selectedIdentifier = identifier;
-    [self.delegate environmentModelSelector:self didSelectModelIdentifier:identifier];
+    [self updateConfirmButtonState];
     [self.tableView reloadData];
     UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, PXLocalizedString(@"image.model.selected_announcement"));
 }
 @end
 
 @interface PXNetworkTypeSelectorViewController ()
-@property (nonatomic, assign) PXEnvironmentNetworkType selectedNetworkType;
+@property (nonatomic, copy) NSSet<NSNumber *> *selectedNetworkTypes;
+@property (nonatomic, copy) NSSet<NSNumber *> *originalNetworkTypes;
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *modelRecord;
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *carrierRecord;
 @end
 
 @implementation PXNetworkTypeSelectorViewController
-- (instancetype)initWithSelectedNetworkType:(PXEnvironmentNetworkType)selectedNetworkType modelRecord:(NSDictionary<NSString *,id> *)modelRecord carrierRecord:(NSDictionary<NSString *,id> *)carrierRecord { self = [super initWithStyle:UITableViewStyleInsetGrouped]; if (self) { _selectedNetworkType = selectedNetworkType; _modelRecord = [modelRecord copy]; _carrierRecord = [carrierRecord copy]; } return self; }
-- (void)viewDidLoad { [super viewDidLoad]; self.title = PXLocalizedString(@"image.network.title"); self.tableView.rowHeight = 56.0; self.tableView.accessibilityLabel = PXLocalizedString(@"image.network.accessibility.list"); [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(handleLanguagePreferenceChanged:) name:PXUILanguagePreferenceDidChangeNotification object:nil]; }
-- (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self name:PXUILanguagePreferenceDidChangeNotification object:nil]; }
-- (void)handleLanguagePreferenceChanged:(NSNotification *)notification { (void)notification; self.title = PXLocalizedString(@"image.network.title"); self.tableView.accessibilityLabel = PXLocalizedString(@"image.network.accessibility.list"); [self.tableView reloadData]; if (self.view.window) { UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, self.tableView); } }
+- (instancetype)initWithSelectedNetworkTypes:(NSSet<NSNumber *> *)selectedNetworkTypes
+                                 modelRecord:(NSDictionary<NSString *, id> *)modelRecord
+                               carrierRecord:(NSDictionary<NSString *, id> *)carrierRecord {
+    self = [super initWithStyle:UITableViewStyleInsetGrouped];
+    if (self) {
+        _selectedNetworkTypes = [selectedNetworkTypes copy] ?: [NSSet set];
+        _originalNetworkTypes = _selectedNetworkTypes;
+        _modelRecord = [modelRecord copy];
+        _carrierRecord = [carrierRecord copy];
+    }
+    return self;
+}
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = PXLocalizedString(@"image.network.title");
+    self.tableView.rowHeight = 56.0;
+    self.tableView.accessibilityLabel = PXLocalizedString(@"image.network.accessibility.list");
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
+        initWithTitle:PXLocalizedString(@"image.network.confirm.title")
+                style:UIBarButtonItemStyleDone
+               target:self
+               action:@selector(handleConfirmTapped:)];
+    [self updateConfirmButtonState];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handleLanguagePreferenceChanged:)
+                                                 name:PXUILanguagePreferenceDidChangeNotification
+                                               object:nil];
+}
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                    name:PXUILanguagePreferenceDidChangeNotification
+                                                  object:nil];
+}
+- (void)handleLanguagePreferenceChanged:(NSNotification *)notification {
+    (void)notification;
+    self.title = PXLocalizedString(@"image.network.title");
+    self.tableView.accessibilityLabel = PXLocalizedString(@"image.network.accessibility.list");
+    self.navigationItem.rightBarButtonItem.title = PXLocalizedString(@"image.network.confirm.title");
+    [self.tableView reloadData];
+    if (self.view.window) {
+        UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, self.tableView);
+    }
+}
+- (void)updateConfirmButtonState {
+    self.navigationItem.rightBarButtonItem.enabled = self.selectedNetworkTypes.count > 0 &&
+        ![self.selectedNetworkTypes isEqualToSet:self.originalNetworkTypes];
+}
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section { return 6; }
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section { return PXLocalizedString(@"image.network.footer"); }
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -917,9 +998,37 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     NSArray<NSString *> *keys = @[@"image.network.wifi", @"image.network.5g", @"image.network.4g", @"image.network.3g", @"image.network.2g", @"image.network.none"];
     NSArray<NSString *> *symbols = @[@"wifi", @"cellularbars", @"cellularbars", @"cellularbars", @"cellularbars", @"wifi.slash"];
     UIListContentConfiguration *content = [UIListContentConfiguration cellConfiguration]; content.text = PXLocalizedString(keys[(NSUInteger)indexPath.row]); content.image = [UIImage systemImageNamed:symbols[(NSUInteger)indexPath.row]]; content.imageProperties.tintColor = UIColor.systemBlueColor; cell.contentConfiguration = content;
-    BOOL selected = type == self.selectedNetworkType; BOOL compatible = [self isNetworkTypeCompatible:type]; cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone; cell.userInteractionEnabled = compatible; content.textProperties.color = compatible ? UIColor.labelColor : UIColor.tertiaryLabelColor; cell.contentConfiguration = content;
+    BOOL selected = [self.selectedNetworkTypes containsObject:@(type)]; BOOL compatible = [self isNetworkTypeCompatible:type]; cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone; cell.userInteractionEnabled = compatible; content.textProperties.color = compatible ? UIColor.labelColor : UIColor.tertiaryLabelColor; cell.contentConfiguration = content;
     cell.accessibilityLabel = content.text; cell.accessibilityValue = selected ? PXLocalizedString(@"accessibility.selected") : compatible ? PXLocalizedString(@"accessibility.not_selected") : PXLocalizedString(@"image.network.unsupported"); cell.accessibilityHint = compatible ? PXLocalizedString(@"image.network.selection_hint") : nil; cell.accessibilityTraits = compatible ? UIAccessibilityTraitButton | (selected ? UIAccessibilityTraitSelected : 0) : UIAccessibilityTraitNotEnabled; return cell;
 }
 - (BOOL)isNetworkTypeCompatible:(PXEnvironmentNetworkType)networkType { if (!PXEnvironmentNetworkTypeIsCompatibleWithModelRecord(networkType, self.modelRecord)) return NO; return networkType != PXEnvironmentNetworkType5GNR || !self.carrierRecord || PXCarrierSupports5G(self.carrierRecord); }
-- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath { [tableView deselectRowAtIndexPath:indexPath animated:YES]; PXEnvironmentNetworkType networkType = (PXEnvironmentNetworkType)indexPath.row + 1; if (![self isNetworkTypeCompatible:networkType]) { UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, PXLocalizedString(@"image.network.unsupported_announcement")); return; } self.selectedNetworkType = networkType; [self.delegate networkTypeSelector:self didSelectNetworkType:self.selectedNetworkType]; [self.tableView reloadData]; UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, PXLocalizedString(@"image.network.selected_announcement")); }
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    PXEnvironmentNetworkType type = (PXEnvironmentNetworkType)indexPath.row + 1;
+    if (![self isNetworkTypeCompatible:type]) {
+        UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,
+                                        PXLocalizedString(@"image.network.unsupported_announcement"));
+        return;
+    }
+    NSMutableSet<NSNumber *> *selection = [self.selectedNetworkTypes mutableCopy];
+    if ([selection containsObject:@(type)]) {
+        [selection removeObject:@(type)];
+    } else if (type == PXEnvironmentNetworkTypeNone) {
+        [selection removeAllObjects];
+        [selection addObject:@(type)];
+    } else {
+        [selection removeObject:@(PXEnvironmentNetworkTypeNone)];
+        [selection addObject:@(type)];
+    }
+    self.selectedNetworkTypes = [selection copy];
+    [self updateConfirmButtonState];
+    [self.tableView reloadData];
+    UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,
+                                    PXLocalizedString(@"image.network.selected_announcement"));
+}
+- (void)handleConfirmTapped:(UIBarButtonItem *)sender {
+    if (!sender.enabled || self.selectedNetworkTypes.count == 0) return;
+    if (![self.delegate networkTypeSelector:self didConfirmNetworkTypes:self.selectedNetworkTypes]) return;
+    [self.navigationController popViewControllerAnimated:YES];
+}
 @end

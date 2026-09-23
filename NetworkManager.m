@@ -4,6 +4,7 @@
 #import "ProjectXLogging.h"
 #import "NetworkIdentity.h"
 #import "PXRootHidePath.h"
+#import "ProfileManifest.h"
 
 @implementation NetworkManager
 
@@ -126,98 +127,21 @@
 
 // Helper method to get the path to the current profile's identity directory
 + (NSString *)profileIdentityPath {
-    // Get current profile ID
-    NSString *profileId = nil;
-    NSString *centralInfoPath = PXCurrentProfileInfoPath();
-    NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-    
-    profileId = centralInfo[@"ProfileId"];
-    if (!profileId) {
-        // If not found, check the legacy active_profile_info.plist
-        NSString *activeInfoPath = PXActiveProfileInfoPath();
-        NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
-        profileId = activeInfo[@"ProfileId"];
-        
-        PXLog(@"[WeaponX] 🔍 NetworkManager - Primary profile info not found, checked backup: %@", profileId ? @"✅ found" : @"❌ not found");
-    }
-    
-    if (!profileId) {
-        PXLog(@"[WeaponX] Warning: No active profile ID found for NetworkManager");
-        // Fallback approach: try to find any profile directory
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *profilesDir = PXProfilesDirectoryPath();
-        NSError *error = nil;
-        NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
-        
-        if (!error && contents.count > 0) {
-            // Use the first directory found as a fallback
-            for (NSString *item in contents) {
-                BOOL isDir = NO;
-                NSString *fullPath = [profilesDir stringByAppendingPathComponent:item];
-                [fileManager fileExistsAtPath:fullPath isDirectory:&isDir];
-                
-                if (isDir) {
-                    profileId = item;
-                    PXLog(@"[WeaponX] NetworkManager using fallback profile ID: %@", profileId);
-                    break;
-                }
-            }
-        }
-        
-        // If we still don't have a profile ID, give up
-        if (!profileId) {
-            PXLog(@"[WeaponX] Error: NetworkManager could not find any profile");
-            return nil;
-        }
-    }
-    
-    // Build the path to this profile's identity directory
-    NSString *identityDir = PXProfileIdentityDirectoryPath(profileId);
-    
-    // Create the directory if it doesn't exist
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:identityDir]) {
-        NSDictionary *attributes = @{
-            NSFilePosixPermissions: @0755,
-            NSFileOwnerAccountName: @"mobile"
-        };
-        
-        NSError *dirError = nil;
-        if (![fileManager createDirectoryAtPath:identityDir 
-                    withIntermediateDirectories:YES 
-                                     attributes:attributes
-                                          error:&dirError]) {
-            PXLog(@"[WeaponX] Error creating identity directory for NetworkManager: %@", dirError);
-            return nil;
-        }
-    }
-    
-    return identityDir;
+    return PXCurrentProfileIdentityValuesPath();
 }
 
 + (BOOL)saveLocalIPAddress:(NSString *)ipAddress {
-    NSString *identityDir = [self profileIdentityPath];
-    if (!identityDir) {
-        PXLog(@"[WeaponX] Error: Could not get profile identity path for NetworkManager");
-        return NO;
-    }
     NSString *ipv6 = [self generateSpoofedLocalIPv6AddressFromCurrent];
-    NSString *networkPath = [identityDir stringByAppendingPathComponent:@"network_settings.plist"];
-    NSDictionary *existingSettings = [NSDictionary dictionaryWithContentsOfFile:networkPath] ?: @{};
-    NSDictionary *networkDict = PXNetworkSettingsByMerging(existingSettings, @{
-        @"localIPAddress": ipAddress ?: @"",
-        @"localIPv6Address": ipv6 ?: @"",
-        @"lastUpdated": [NSDate date]
-    });
-    BOOL success = [networkDict writeToFile:networkPath atomically:YES];
-    if (success) {
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: [NSMutableDictionary dictionary];
-        deviceIds[@"LocalIPAddress"] = ipAddress;
-        deviceIds[@"LocalIPv6Address"] = ipv6;
-        success = [deviceIds writeToFile:deviceIdsPath atomically:YES];
-    }
+    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:[self profileIdentityPath]];
+    NSError *saveError = nil;
+    BOOL success = [store replaceActiveLocalIPAddress:ipAddress IPv6Address:ipv6 error:&saveError];
     PXLog(@"[WeaponX] %@ Local IP Address (IPv4/IPv6) saved to profile: %@ / %@", success ? @"✅" : @"❌", ipAddress, ipv6);
+    if (!success) PXLog(@"[WeaponX] Local IP save failed: %@", saveError.localizedDescription);
+    if (success) {
+        CFNotificationCenterRef center = CFNotificationCenterGetDarwinNotifyCenter();
+        CFNotificationCenterPostNotification(center, CFSTR("com.hydra.projectx.profileChanged"), NULL, NULL, YES);
+        CFNotificationCenterPostNotification(center, CFSTR("com.hydra.projectx.networkConnectionTypeChanged"), NULL, NULL, YES);
+    }
     return success;
 }
 
@@ -238,7 +162,7 @@
         NSString *localIP = [self generateSpoofedLocalIPAddressFromCurrent];
         
         // Save it for future use
-        [self saveLocalIPAddress:localIP];
+        if (![self saveLocalIPAddress:localIP]) return nil;
         
         PXLog(@"[WeaponX] Forced refresh of local IP address: %@", localIP);
         return localIP;
@@ -246,14 +170,14 @@
     
     // Try to read from network_settings.plist
     NSString *networkPath = [identityDir stringByAppendingPathComponent:@"network_settings.plist"];
-    NSDictionary *networkDict = [NSDictionary dictionaryWithContentsOfFile:networkPath];
+    NSDictionary *networkDict = PXProfileReadDictionary(networkPath);
     
     NSString *localIP = networkDict[@"localIPAddress"];
     
     // If not found in dedicated file, try the combined device_ids.plist
     if (!localIP) {
         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+        NSDictionary *deviceIds = PXProfileReadDictionary(deviceIdsPath);
         localIP = deviceIds[@"LocalIPAddress"];
     }
     
@@ -270,11 +194,11 @@
     NSString *identityDir = [self profileIdentityPath];
     if (!identityDir) return nil;
     NSString *networkPath = [identityDir stringByAppendingPathComponent:@"network_settings.plist"];
-    NSDictionary *networkDict = [NSDictionary dictionaryWithContentsOfFile:networkPath];
+    NSDictionary *networkDict = PXProfileReadDictionary(networkPath);
     NSString *ipv6 = networkDict[@"localIPv6Address"];
     if (!ipv6) {
         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+        NSDictionary *deviceIds = PXProfileReadDictionary(deviceIdsPath);
         ipv6 = deviceIds[@"LocalIPv6Address"];
     }
     if (!ipv6) {
@@ -291,7 +215,7 @@
         return nil;
     }
     NSString *networkPath = [identityDirectory stringByAppendingPathComponent:@"network_settings.plist"];
-    NSDictionary *identity = [NSDictionary dictionaryWithContentsOfFile:networkPath];
+    NSDictionary *identity = PXProfileReadDictionary(networkPath);
     return [identity isKindOfClass:[NSDictionary class]] ? identity : nil;
 }
 
@@ -327,14 +251,14 @@
         return nil;
     }
     NSString *carrierPath = [identityDirectory stringByAppendingPathComponent:@"carrier_details.plist"];
-    NSDictionary *carrierDictionary = [NSDictionary dictionaryWithContentsOfFile:carrierPath];
+    NSDictionary *carrierDictionary = PXProfileReadDictionary(carrierPath);
     details = [self carrierDetailsFromIdentity:carrierDictionary];
     if (details) {
         return details;
     }
 
     NSString *deviceIdsPath = [identityDirectory stringByAppendingPathComponent:@"device_ids.plist"];
-    NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+    NSDictionary *deviceIds = PXProfileReadDictionary(deviceIdsPath);
     return [self carrierDetailsFromIdentity:@{
         @"carrierName": deviceIds[@"CarrierName"] ?: @"",
         @"mcc": deviceIds[@"CarrierMCC"] ?: @"",

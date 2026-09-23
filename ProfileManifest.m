@@ -2,11 +2,8 @@
 
 #import "NetworkIdentity.h"
 #import "RegionIdentity.h"
+#import "PXRootHidePath.h"
 
-#include <sys/stat.h>
-#include <sys/file.h>
-#include <fcntl.h>
-#include <unistd.h>
 
 static NSString *const PXProfileManifestErrorDomain = @"com.hydra.projectx.profile-manifest";
 
@@ -148,7 +145,6 @@ static NSDictionary<NSString *, NSString *> *PXProfileFieldSourcePolicy(void) {
 
 @interface PXProfileManifest ()
 
-@property (nonatomic, readwrite) NSInteger schemaVersion;
 @property (nonatomic, copy, readwrite) NSString *generationID;
 @property (nonatomic, copy, readwrite) NSString *seed;
 @property (nonatomic, copy, readwrite) NSDate *generatedAt;
@@ -205,7 +201,6 @@ static NSDictionary<NSString *, NSDictionary<NSString *, id> *> *PXAppGroupIdent
 
 - (NSDictionary<NSString *, id> *)propertyListRepresentation {
     return @{
-        @"schemaVersion": @(self.schemaVersion),
         @"generationID": self.generationID,
         @"seed": self.seed,
         @"generatedAt": self.generatedAt,
@@ -224,7 +219,7 @@ static NSDictionary<NSString *, NSDictionary<NSString *, id> *> *PXAppGroupIdent
 }
 
 - (BOOL)validateWithError:(NSError * _Nullable * _Nullable)error {
-    if (self.schemaVersion != 5 || ![[NSUUID alloc] initWithUUIDString:self.generationID] ||
+    if (![[NSUUID alloc] initWithUUIDString:self.generationID] ||
         self.seed.length == 0 || !self.generatedAt) {
         return PXProfileManifestValidationFailure(error, @"Manifest metadata is incomplete");
     }
@@ -360,8 +355,6 @@ static NSDictionary<NSString *, NSDictionary<NSString *, id> *> *PXAppGroupIdent
     }
 
     PXProfileManifest *manifest = [[self alloc] init];
-    NSInteger storedSchemaVersion = [propertyList[@"schemaVersion"] integerValue];
-    manifest.schemaVersion = (storedSchemaVersion == 3 || storedSchemaVersion == 4) ? 5 : storedSchemaVersion;
     manifest.generationID = propertyList[@"generationID"] ?: @"";
     manifest.seed = propertyList[@"seed"] ?: @"";
     manifest.generatedAt = propertyList[@"generatedAt"];
@@ -372,16 +365,10 @@ static NSDictionary<NSString *, NSDictionary<NSString *, id> *> *PXAppGroupIdent
     [identifiers removeObjectsForKeys:@[@"appGroupUUID", @"appInstallUUID", @"appContainerUUID"]];
     manifest.identifiers = [identifiers copy];
     manifest.network = propertyList[@"network"] ?: @{};
-    NSData *regionSeed = [[NSData alloc] initWithBase64EncodedString:manifest.seed options:0]
-        ?: [manifest.seed dataUsingEncoding:NSUTF8StringEncoding];
     NSDictionary<NSString *, id> *storedRegion = [propertyList[@"region"] isKindOfClass:[NSDictionary class]]
         ? propertyList[@"region"]
         : @{};
-    PXRegionIdentity *regionIdentity = storedSchemaVersion == 3 || storedSchemaVersion == 4
-        ? PXRegionIdentityByCompletingPropertyList(storedRegion,
-                                                   manifest.network[@"isoCountryCode"] ?: @"",
-                                                   regionSeed ?: [NSData data])
-        : [PXRegionIdentity identityWithPropertyList:storedRegion];
+    PXRegionIdentity *regionIdentity = [PXRegionIdentity identityWithPropertyList:storedRegion];
     manifest.region = [regionIdentity propertyListRepresentation] ?: @{};
     manifest.location = propertyList[@"location"] ?: @{};
     manifest.graphics = [propertyList[@"graphics"] isKindOfClass:[NSDictionary class]]
@@ -427,9 +414,7 @@ static NSDictionary<NSString *, NSDictionary<NSString *, id> *> *PXAppGroupIdent
         return nil;
     }
     manifest.appGroupIdentities = [appGroupIdentities copy];
-    manifest.fieldSourcePolicy = storedSchemaVersion == 3 || storedSchemaVersion == 4
-        ? PXProfileFieldSourcePolicy()
-        : (propertyList[@"fieldSourcePolicy"] ?: @{});
+    manifest.fieldSourcePolicy = propertyList[@"fieldSourcePolicy"] ?: @{};
     manifest.virtualSession = [PXVirtualRuntimeSession sessionWithPropertyList:propertyList[@"virtualSession"] ?: @{}];
     return [manifest validateWithError:error] ? manifest : nil;
 }
@@ -562,7 +547,13 @@ NSUUID *PXProfileVendorIdentifierForBundleIdentifier(PXProfileManifest *manifest
         [random indexWithUpperBound:UINT16_MAX],
         serviceIdentifier
     ) mutableCopy];
-    if (input.networkType == PXEnvironmentNetworkType5GNR && ![device[@"supports5G"] boolValue]) {
+    NSSet<NSNumber *> *networkTypes = input.networkTypes.count > 0
+        ? input.networkTypes
+        : (input.networkType == PXEnvironmentNetworkTypeUnspecified
+            ? [NSSet set] : [NSSet setWithObject:@(input.networkType)]);
+    PXEnvironmentNetworkType activeNetworkType = PXPreferredEnvironmentNetworkType(networkTypes);
+    BOOL includes5G = [networkTypes containsObject:@(PXEnvironmentNetworkType5GNR)];
+    if (includes5G && ![device[@"supports5G"] boolValue]) {
         if (error) {
             *error = [NSError errorWithDomain:PXProfileManifestErrorDomain
                                          code:18
@@ -572,39 +563,43 @@ NSUUID *PXProfileVendorIdentifierForBundleIdentifier(PXProfileManifest *manifest
         return nil;
     }
     NSString *configuredRadioTechnology = nil;
-    switch (input.networkType) {
+    if (includes5G) {
+        NSArray<NSString *> *supportedTechnologies = network[@"supportedRadioTechnologies"];
+        configuredRadioTechnology = [supportedTechnologies containsObject:@"CTRadioAccessTechnologyNR"]
+            ? @"CTRadioAccessTechnologyNR"
+            : ([supportedTechnologies containsObject:@"CTRadioAccessTechnologyNRNSA"]
+                ? @"CTRadioAccessTechnologyNRNSA"
+                : nil);
+        if (!configuredRadioTechnology) {
+            if (error) {
+                *error = [NSError errorWithDomain:PXProfileManifestErrorDomain
+                                             code:19
+                                         userInfo:@{NSLocalizedDescriptionKey:
+                                             @"Selected Carrier does not support the configured 5G network"}];
+            }
+            return nil;
+        }
+    } else if ([networkTypes containsObject:@(PXEnvironmentNetworkType4GLTE)]) {
+        configuredRadioTechnology = @"CTRadioAccessTechnologyLTE";
+    } else if ([networkTypes containsObject:@(PXEnvironmentNetworkType3G)]) {
+        configuredRadioTechnology = @"CTRadioAccessTechnologyWCDMA";
+    } else if ([networkTypes containsObject:@(PXEnvironmentNetworkType2G)]) {
+        configuredRadioTechnology = @"CTRadioAccessTechnologyEdge";
+    }
+    switch (activeNetworkType) {
         case PXEnvironmentNetworkTypeWiFi:
             network[@"transport"] = @"wifi";
             break;
-        case PXEnvironmentNetworkType5GNR: {
-            NSArray<NSString *> *supportedTechnologies = network[@"supportedRadioTechnologies"];
-            configuredRadioTechnology = [supportedTechnologies containsObject:@"CTRadioAccessTechnologyNR"]
-                ? @"CTRadioAccessTechnologyNR"
-                : ([supportedTechnologies containsObject:@"CTRadioAccessTechnologyNRNSA"]
-                    ? @"CTRadioAccessTechnologyNRNSA"
-                    : nil);
-            if (!configuredRadioTechnology) {
-                if (error) {
-                    *error = [NSError errorWithDomain:PXProfileManifestErrorDomain
-                                                 code:19
-                                             userInfo:@{NSLocalizedDescriptionKey:
-                                                 @"Selected Carrier does not support the configured 5G network"}];
-                }
-                return nil;
-            }
+        case PXEnvironmentNetworkType5GNR:
             network[@"transport"] = @"cellular";
             break;
-        }
         case PXEnvironmentNetworkType4GLTE:
-            configuredRadioTechnology = @"CTRadioAccessTechnologyLTE";
             network[@"transport"] = @"cellular";
             break;
         case PXEnvironmentNetworkType3G:
-            configuredRadioTechnology = @"CTRadioAccessTechnologyWCDMA";
             network[@"transport"] = @"cellular";
             break;
         case PXEnvironmentNetworkType2G:
-            configuredRadioTechnology = @"CTRadioAccessTechnologyEdge";
             network[@"transport"] = @"cellular";
             break;
         case PXEnvironmentNetworkTypeNone:
@@ -616,14 +611,37 @@ NSUUID *PXProfileVendorIdentifierForBundleIdentifier(PXProfileManifest *manifest
     }
     if (configuredRadioTechnology) {
         network[@"radioTechnology"] = configuredRadioTechnology;
-        if (configuredRadioTechnology.length > 0 &&
-            ![network[@"supportedRadioTechnologies"] containsObject:configuredRadioTechnology]) {
-            network[@"supportedRadioTechnologies"] =
-                [network[@"supportedRadioTechnologies"] arrayByAddingObject:configuredRadioTechnology];
+        NSMutableArray<NSString *> *enabledRadioTechnologies = [NSMutableArray array];
+        for (NSString *technology in network[@"supportedRadioTechnologies"]) {
+            BOOL enabled5G = includes5G &&
+                ([technology isEqualToString:@"CTRadioAccessTechnologyNR"] ||
+                 [technology isEqualToString:@"CTRadioAccessTechnologyNRNSA"]);
+            if ((enabled5G || ([networkTypes containsObject:@(PXEnvironmentNetworkType4GLTE)] &&
+                               [technology isEqualToString:@"CTRadioAccessTechnologyLTE"])) &&
+                ![enabledRadioTechnologies containsObject:technology]) {
+                [enabledRadioTechnologies addObject:technology];
+            }
         }
+        for (NSString *technology in @[@"CTRadioAccessTechnologyLTE",
+                                       @"CTRadioAccessTechnologyWCDMA",
+                                       @"CTRadioAccessTechnologyEdge"]) {
+            BOOL enabled = ([technology isEqualToString:@"CTRadioAccessTechnologyLTE"] &&
+                            [networkTypes containsObject:@(PXEnvironmentNetworkType4GLTE)]) ||
+                           ([technology isEqualToString:@"CTRadioAccessTechnologyWCDMA"] &&
+                            [networkTypes containsObject:@(PXEnvironmentNetworkType3G)]) ||
+                           ([technology isEqualToString:@"CTRadioAccessTechnologyEdge"] &&
+                            [networkTypes containsObject:@(PXEnvironmentNetworkType2G)]);
+            if (enabled && ![enabledRadioTechnologies containsObject:technology]) {
+                [enabledRadioTechnologies addObject:technology];
+            }
+        }
+        network[@"supportedRadioTechnologies"] = [enabledRadioTechnologies copy];
     }
-    network[@"configuredNetworkType"] = PXEnvironmentNetworkTypeIdentifier(input.networkType);
-    if (input.networkType == PXEnvironmentNetworkTypeNone) {
+    network[@"configuredNetworkType"] = PXEnvironmentNetworkTypeIdentifier(activeNetworkType);
+    if (networkTypes.count > 0) {
+        network[@"configuredNetworkTypes"] = PXEnvironmentNetworkTypeIdentifiers(networkTypes);
+    }
+    if (activeNetworkType == PXEnvironmentNetworkTypeNone) {
         network[@"localIPAddress"] = @"";
         network[@"localIPv6Address"] = @"";
         network[@"ssid"] = @"";
@@ -720,7 +738,6 @@ NSUUID *PXProfileVendorIdentifierForBundleIdentifier(PXProfileManifest *manifest
     }
 
     PXProfileManifest *manifest = [[PXProfileManifest alloc] init];
-    manifest.schemaVersion = 5;
     manifest.generationID = generationID;
     manifest.seed = [input.seed base64EncodedStringWithOptions:0];
     manifest.generatedAt = input.generatedAt;
@@ -759,7 +776,6 @@ NSUUID *PXProfileVendorIdentifierForBundleIdentifier(PXProfileManifest *manifest
 
 - (NSArray<NSString *> *)projectionFileNames {
     return @[
-        @"profile_manifest.plist",
         @"device_model.plist",
         @"ios_version.plist",
         @"device_ids.plist",
@@ -781,24 +797,6 @@ NSUUID *PXProfileVendorIdentifierForBundleIdentifier(PXProfileManifest *manifest
         @"region.plist",
         @"location.plist"
     ];
-}
-
-- (NSArray<NSString *> *)retiredAppIdentityProjectionFileNames {
-    return @[@"appgroup_uuid.plist", @"appinstall_uuid.plist", @"appcontainer_uuid.plist"];
-}
-
-- (void)removeRetiredAppIdentityProjections {
-    for (NSString *fileName in [self retiredAppIdentityProjectionFileNames]) {
-        NSString *retiredPath = [self.identityDirectory stringByAppendingPathComponent:fileName];
-        struct stat pathInfo;
-        if (lstat(retiredPath.fileSystemRepresentation, &pathInfo) == 0 && !S_ISDIR(pathInfo.st_mode)) {
-            unlink(retiredPath.fileSystemRepresentation);
-        }
-    }
-}
-
-- (NSArray<NSString *> *)legacyProjectionFileNames {
-    return [[self projectionFileNames] arrayByAddingObjectsFromArray:[self retiredAppIdentityProjectionFileNames]];
 }
 
 - (NSDictionary<NSString *, NSDictionary<NSString *, id> *> *)projectionsForManifest:(PXProfileManifest *)manifest {
@@ -883,7 +881,6 @@ NSUUID *PXProfileVendorIdentifierForBundleIdentifier(PXProfileManifest *manifest
     };
 
     NSMutableDictionary<NSString *, NSDictionary<NSString *, id> *> *projections = [@{
-        @"profile_manifest.plist": [manifest propertyListRepresentation],
         @"device_model.plist": [deviceModel copy],
         @"ios_version.plist": [operatingSystem copy],
         @"device_ids.plist": [deviceIds copy],
@@ -942,16 +939,6 @@ NSUUID *PXProfileVendorIdentifierForBundleIdentifier(PXProfileManifest *manifest
     return [projections copy];
 }
 
-- (BOOL)pathExistsWithoutFollowingSymlinks:(NSString *)path isSymlink:(BOOL *)isSymlink {
-    struct stat fileStatus;
-    if (lstat(path.fileSystemRepresentation, &fileStatus) != 0) {
-        if (isSymlink) *isSymlink = NO;
-        return NO;
-    }
-    if (isSymlink) *isSymlink = S_ISLNK(fileStatus.st_mode);
-    return YES;
-}
-
 - (BOOL)failWithError:(NSError * _Nullable * _Nullable)error code:(NSInteger)code reason:(NSString *)reason {
     if (error) {
         *error = [NSError errorWithDomain:PXProfileManifestErrorDomain
@@ -961,197 +948,108 @@ NSUUID *PXProfileVendorIdentifierForBundleIdentifier(PXProfileManifest *manifest
     return NO;
 }
 
-- (BOOL)promoteManifest:(PXProfileManifest *)manifest error:(NSError * _Nullable * _Nullable)error {
-    @synchronized([PXProfileStore class]) {
-        return [self performPromotionOfManifest:manifest error:error];
+- (NSString *)profileFilePath {
+    // Production projections are keys in current_profile.plist.
+    if ([self.identityDirectory isEqualToString:PXCurrentProfileIdentityValuesPath()]) {
+        return PXCurrentProfileInfoPath();
     }
+    return [[[self.identityDirectory.stringByDeletingLastPathComponent
+        stringByDeletingLastPathComponent] stringByDeletingLastPathComponent]
+        stringByAppendingPathComponent:@"current_profile.plist"];
 }
 
-- (BOOL)performPromotionOfManifest:(PXProfileManifest *)manifest error:(NSError * _Nullable * _Nullable)error {
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager createDirectoryAtPath:self.identityDirectory
-                withIntermediateDirectories:YES
-                                 attributes:nil
-                                      error:error]) {
-        return NO;
-    }
-
-    NSString *lockPath = [self.identityDirectory stringByAppendingPathComponent:@".profile-generation.lock"];
-    int lockDescriptor = open(lockPath.fileSystemRepresentation, O_CREAT | O_RDWR, 0600);
-    if (lockDescriptor < 0) {
-        return [self failWithError:error code:11 reason:@"Failed to open Profile generation lock"];
-    }
-    if (flock(lockDescriptor, LOCK_EX) != 0) {
-        close(lockDescriptor);
-        return [self failWithError:error code:12 reason:@"Failed to acquire Profile generation lock"];
-    }
-
-    BOOL promoted = [self performLockedPromotionOfManifest:manifest error:error];
-    flock(lockDescriptor, LOCK_UN);
-    close(lockDescriptor);
-    return promoted;
-}
-
-- (BOOL)performLockedPromotionOfManifest:(PXProfileManifest *)manifest error:(NSError * _Nullable * _Nullable)error {
-    NSError *validationError = nil;
-    if (![manifest validateWithError:&validationError]) {
-        if (error) *error = validationError;
-        return NO;
-    }
-
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager createDirectoryAtPath:self.identityDirectory
-                withIntermediateDirectories:YES
-                                 attributes:nil
-                                      error:error]) {
-        return NO;
-    }
-    NSString *generationsDirectory = [self.identityDirectory stringByAppendingPathComponent:@"profile_generations"];
-    if (![fileManager createDirectoryAtPath:generationsDirectory
-                withIntermediateDirectories:YES
-                                 attributes:nil
-                                      error:error]) {
-        return NO;
-    }
-
-    NSString *stagingDirectory = [self.identityDirectory stringByAppendingPathComponent:
-        [NSString stringWithFormat:@".profile-staging-%@", NSUUID.UUID.UUIDString]];
-    if (![fileManager createDirectoryAtPath:stagingDirectory
-                withIntermediateDirectories:NO
-                                 attributes:nil
-                                      error:error]) {
-        return NO;
-    }
-
-    NSDictionary<NSString *, NSDictionary<NSString *, id> *> *projections = [self projectionsForManifest:manifest];
-    for (NSString *fileName in [self projectionFileNames]) {
-        NSString *stagedPath = [stagingDirectory stringByAppendingPathComponent:fileName];
-        if (![projections[fileName] writeToFile:stagedPath atomically:YES]) {
-            [fileManager removeItemAtPath:stagingDirectory error:nil];
-            return [self failWithError:error code:5 reason:[NSString stringWithFormat:@"Failed to stage %@", fileName]];
-        }
-    }
-
-    if (self.failBeforePromotionForTesting) {
-        [fileManager removeItemAtPath:stagingDirectory error:nil];
-        return [self failWithError:error code:6 reason:@"Injected failure before Profile promotion"];
-    }
-
-    NSString *generationDirectory = [generationsDirectory stringByAppendingPathComponent:manifest.generationID];
-    BOOL generationDirectoryIsSymlink = NO;
-    BOOL generationDirectoryExists = [self pathExistsWithoutFollowingSymlinks:generationDirectory
-                                                                     isSymlink:&generationDirectoryIsSymlink];
-    if (generationDirectoryExists) {
-        BOOL generationDirectoryIsDirectory = NO;
-        [fileManager fileExistsAtPath:generationDirectory
-                          isDirectory:&generationDirectoryIsDirectory];
-        BOOL existingGenerationMatches = generationDirectoryIsDirectory &&
-            !generationDirectoryIsSymlink;
-        for (NSString *fileName in [self projectionFileNames]) {
-            if (!existingGenerationMatches) {
-                break;
+- (BOOL)writeManifestPropertyList:(NSDictionary *)propertyList
+                      projections:(NSDictionary<NSString *, NSDictionary *> *)projections
+                            error:(NSError * _Nullable * _Nullable)error {
+    if (!PXProfileUpdateContentsAtPath([self profileFilePath], ^(NSMutableDictionary *profile) {
+        NSMutableDictionary *values = [profile[@"values"] isKindOfClass:[NSDictionary class]]
+            ? [profile[@"values"] mutableCopy] : [NSMutableDictionary dictionary];
+        if (projections) {
+            for (NSString *key in [values.allKeys copy]) {
+                if ([key hasPrefix:@"identity/"]) [values removeObjectForKey:key];
             }
-            NSDictionary<NSString *, id> *existingProjection = [NSDictionary
-                dictionaryWithContentsOfFile:[generationDirectory
-                    stringByAppendingPathComponent:fileName]];
-            existingGenerationMatches = [existingProjection
-                isEqualToDictionary:projections[fileName]];
-        }
-        [fileManager removeItemAtPath:stagingDirectory error:nil];
-        if (!existingGenerationMatches) {
-            return [self failWithError:error
-                                  code:14
-                                reason:@"Generation identifier already exists with different materialized values"];
-        }
-    } else if (![fileManager moveItemAtPath:stagingDirectory toPath:generationDirectory error:error]) {
-        [fileManager removeItemAtPath:stagingDirectory error:nil];
-        return NO;
-    }
-
-    NSMutableArray<NSString *> *createdProjectionLinks = [NSMutableArray array];
-    for (NSString *fileName in [self projectionFileNames]) {
-        NSString *projectionPath = [self.identityDirectory stringByAppendingPathComponent:fileName];
-        BOOL isSymlink = NO;
-        if ([self pathExistsWithoutFollowingSymlinks:projectionPath isSymlink:&isSymlink]) {
-            if (!isSymlink) {
-                for (NSString *createdPath in createdProjectionLinks) unlink(createdPath.fileSystemRepresentation);
-                return [self failWithError:error code:7 reason:@"Legacy projections must be migrated before regeneration"];
+            for (NSString *fileName in projections) {
+                values[[@"identity" stringByAppendingPathComponent:fileName]] = projections[fileName];
             }
-            continue;
         }
-
-        NSString *target = [@"profile_active" stringByAppendingPathComponent:fileName];
-        if (symlink(target.fileSystemRepresentation, projectionPath.fileSystemRepresentation) != 0) {
-            for (NSString *createdPath in createdProjectionLinks) unlink(createdPath.fileSystemRepresentation);
-            return [self failWithError:error code:8 reason:[NSString stringWithFormat:@"Failed to link %@", fileName]];
-        }
-        [createdProjectionLinks addObject:projectionPath];
+        profile[@"manifest"] = propertyList;
+        profile[@"values"] = values;
+    })) {
+        return [self failWithError:error code:5 reason:@"Failed to save current_profile.plist"];
     }
-
-    NSString *activePath = [self.identityDirectory stringByAppendingPathComponent:@"profile_active"];
-    NSString *temporaryActivePath = [self.identityDirectory stringByAppendingPathComponent:
-        [NSString stringWithFormat:@".profile-active-%@", NSUUID.UUID.UUIDString]];
-    NSString *activeTarget = [@"profile_generations" stringByAppendingPathComponent:manifest.generationID];
-    if (symlink(activeTarget.fileSystemRepresentation, temporaryActivePath.fileSystemRepresentation) != 0 ||
-        rename(temporaryActivePath.fileSystemRepresentation, activePath.fileSystemRepresentation) != 0) {
-        unlink(temporaryActivePath.fileSystemRepresentation);
-        for (NSString *createdPath in createdProjectionLinks) unlink(createdPath.fileSystemRepresentation);
-        return [self failWithError:error code:9 reason:@"Failed to atomically activate Profile generation"];
-    }
-    [self removeRetiredAppIdentityProjections];
     return YES;
 }
 
+- (BOOL)promoteManifest:(PXProfileManifest *)manifest error:(NSError * _Nullable * _Nullable)error {
+    if (![manifest validateWithError:error]) return NO;
+    if (self.failBeforePromotionForTesting) {
+        return [self failWithError:error code:6 reason:@"Injected failure before Profile save"];
+    }
+    @synchronized([PXProfileStore class]) {
+        return [self writeManifestPropertyList:[manifest propertyListRepresentation]
+                                   projections:[self projectionsForManifest:manifest]
+                                         error:error];
+    }
+}
+
+- (BOOL)replaceActiveIdentifierValue:(NSString *)value
+                              forKey:(NSString *)key
+                               error:(NSError * _Nullable * _Nullable)error {
+    NSSet<NSString *> *allowedKeys = [NSSet setWithArray:@[
+        @"idfa", @"idfv", @"deviceName", @"serialNumber", @"imei", @"meid",
+        @"dyldCacheUUID", @"pasteboardUUID", @"keychainUUID",
+        @"userDefaultsUUID", @"coreDataUUID"
+    ]];
+    if (![allowedKeys containsObject:key] || ![value isKindOfClass:[NSString class]] || value.length == 0) {
+        return [self failWithError:error code:14 reason:@"Invalid Profile identifier update"];
+    }
+    @synchronized([PXProfileStore class]) {
+        PXProfileManifest *current = [self activeManifestWithError:error];
+        if (!current) return NO;
+        NSMutableDictionary *updated = [[current propertyListRepresentation] mutableCopy];
+        NSMutableDictionary *identifiers = [current.identifiers mutableCopy];
+        identifiers[key] = value;
+        updated[@"identifiers"] = identifiers;
+        PXProfileManifest *manifest = [PXProfileManifest manifestWithPropertyList:updated error:error];
+        if (!manifest) return NO;
+        return [self writeManifestPropertyList:updated
+                                   projections:[self projectionsForManifest:manifest]
+                                         error:error];
+    }
+}
+
+- (BOOL)replaceActiveLocalIPAddress:(NSString *)ipv4
+                       IPv6Address:(NSString *)ipv6
+                             error:(NSError * _Nullable * _Nullable)error {
+    if (![ipv4 isKindOfClass:[NSString class]] || ipv4.length == 0 ||
+        ![ipv6 isKindOfClass:[NSString class]] || ipv6.length == 0) {
+        return [self failWithError:error code:14 reason:@"Invalid Profile local IP address"];
+    }
+    @synchronized([PXProfileStore class]) {
+        PXProfileManifest *current = [self activeManifestWithError:error];
+        if (!current) return NO;
+        NSMutableDictionary *updated = [[current propertyListRepresentation] mutableCopy];
+        NSMutableDictionary *network = [current.network mutableCopy];
+        network[@"localIPAddress"] = ipv4;
+        network[@"localIPv6Address"] = ipv6;
+        updated[@"network"] = network;
+        PXProfileManifest *manifest = [PXProfileManifest manifestWithPropertyList:updated error:error];
+        if (!manifest) return NO;
+        return [self writeManifestPropertyList:updated
+                                   projections:[self projectionsForManifest:manifest]
+                                         error:error];
+    }
+}
+
 - (nullable NSString *)activeGenerationIDWithError:(NSError * _Nullable * _Nullable)error {
-    NSString *activePath = [self.identityDirectory stringByAppendingPathComponent:@"profile_active"];
-    BOOL isSymlink = NO;
-    if (![self pathExistsWithoutFollowingSymlinks:activePath isSymlink:&isSymlink] || !isSymlink) {
-        [self failWithError:error code:15 reason:@"Active Profile generation link is missing or invalid"];
-        return nil;
-    }
-
-    NSError *linkError = nil;
-    NSString *target = [[NSFileManager defaultManager]
-        destinationOfSymbolicLinkAtPath:activePath
-        error:&linkError];
-    NSArray<NSString *> *components = target.pathComponents;
-    NSString *generationID = components.count == 2 ? components.lastObject : nil;
-    if (linkError || ![components.firstObject isEqualToString:@"profile_generations"] ||
-        ![[NSUUID alloc] initWithUUIDString:generationID]) {
-        [self failWithError:error code:15 reason:@"Active Profile generation link target is invalid"];
-        return nil;
-    }
-
-    NSString *generationDirectory = [[self.identityDirectory
-        stringByAppendingPathComponent:@"profile_generations"]
-        stringByAppendingPathComponent:generationID];
-    struct stat generationStatus;
-    if (lstat(generationDirectory.fileSystemRepresentation, &generationStatus) != 0 ||
-        !S_ISDIR(generationStatus.st_mode) || S_ISLNK(generationStatus.st_mode)) {
-        [self failWithError:error code:15 reason:@"Active Profile generation directory is invalid"];
-        return nil;
-    }
-    return generationID;
+    return [self activeManifestWithError:error].generationID;
 }
 
 - (nullable PXProfileManifest *)activeManifestWithError:(NSError * _Nullable * _Nullable)error {
-    NSString *manifestPath = [self.identityDirectory stringByAppendingPathComponent:@"profile_manifest.plist"];
-    NSDictionary *propertyList = [NSDictionary dictionaryWithContentsOfFile:manifestPath];
-    PXProfileManifest *manifest = [PXProfileManifest manifestWithPropertyList:propertyList error:error];
-    if (!manifest) {
-        return nil;
-    }
-
-    for (NSString *fileName in [self projectionFileNames]) {
-        if ([fileName isEqualToString:@"profile_manifest.plist"]) continue;
-        NSString *projectionPath = [self.identityDirectory stringByAppendingPathComponent:fileName];
-        NSDictionary *projection = [NSDictionary dictionaryWithContentsOfFile:projectionPath];
-        if (![projection[@"generationID"] isEqualToString:manifest.generationID]) {
-            [self failWithError:error code:10 reason:[NSString stringWithFormat:@"Mixed or corrupt projection: %@", fileName]];
-            return nil;
-        }
-    }
-    return manifest;
+    NSDictionary *profile = PXProfileReadContentsAtPath([self profileFilePath]);
+    NSDictionary *propertyList = [profile[@"manifest"] isKindOfClass:[NSDictionary class]]
+        ? profile[@"manifest"] : nil;
+    return [PXProfileManifest manifestWithPropertyList:propertyList error:error];
 }
 
 - (nullable NSDictionary<NSString *, NSDictionary<NSString *, id> *> *)activeApplicationIdentityPropertyListsWithError:(NSError * _Nullable * _Nullable)error {
@@ -1164,50 +1062,24 @@ NSUUID *PXProfileVendorIdentifierForBundleIdentifier(PXProfileManifest *manifest
     if (![appIdentities isKindOfClass:[NSDictionary class]]) {
         return [self failWithError:error code:13 reason:@"Application identity map is invalid"];
     }
-    NSMutableDictionary<NSString *, PXAppIdentityRecord *> *validatedIdentities =
-        [NSMutableDictionary dictionaryWithCapacity:appIdentities.count];
+    NSMutableDictionary<NSString *, PXAppIdentityRecord *> *validated = [NSMutableDictionary dictionary];
     for (id bundleIdentifier in appIdentities) {
-        NSDictionary<NSString *, id> *propertyList = appIdentities[bundleIdentifier];
-        PXAppIdentityRecord *identity =
-            [propertyList isKindOfClass:[NSDictionary class]]
-                ? [PXAppIdentityRecord identityWithPropertyList:propertyList]
-                : nil;
+        NSDictionary *propertyList = appIdentities[bundleIdentifier];
+        PXAppIdentityRecord *identity = [propertyList isKindOfClass:[NSDictionary class]]
+            ? [PXAppIdentityRecord identityWithPropertyList:propertyList] : nil;
         if (![bundleIdentifier isKindOfClass:[NSString class]] ||
             !PXAppIdentityBundleIsEligible(bundleIdentifier, YES, NO) || !identity) {
             return [self failWithError:error code:13 reason:@"Application identity map is invalid"];
         }
-        validatedIdentities[bundleIdentifier] = identity;
-    }
-    if (![self migrateLegacyProfileIfNeededWithError:error]) {
-        return NO;
+        validated[bundleIdentifier] = identity;
     }
     @synchronized([PXProfileStore class]) {
-        NSString *lockPath = [self.identityDirectory stringByAppendingPathComponent:@".profile-generation.lock"];
-        int lockDescriptor = open(lockPath.fileSystemRepresentation, O_CREAT | O_RDWR, 0600);
-        if (lockDescriptor < 0) {
-            return [self failWithError:error code:11 reason:@"Failed to open Profile generation lock"];
-        }
-        if (flock(lockDescriptor, LOCK_EX) != 0) {
-            close(lockDescriptor);
-            return [self failWithError:error code:12 reason:@"Failed to acquire Profile generation lock"];
-        }
-
-        PXProfileManifest *activeManifest = [self activeManifestWithError:error];
-        NSMutableDictionary<NSString *, id> *updatedPropertyList =
-            [[activeManifest propertyListRepresentation] mutableCopy];
-        updatedPropertyList[@"appIdentities"] = PXAppIdentityPropertyLists(validatedIdentities);
-        PXProfileManifest *updatedManifest = activeManifest
-            ? [PXProfileManifest manifestWithPropertyList:updatedPropertyList error:error]
-            : nil;
-        NSString *manifestPath = [[self.identityDirectory stringByAppendingPathComponent:@"profile_manifest.plist"]
-            stringByResolvingSymlinksInPath];
-        BOOL success = updatedManifest && [updatedPropertyList writeToFile:manifestPath atomically:YES];
-        if (!success && updatedManifest) {
-            [self failWithError:error code:14 reason:@"Failed to persist application identity mapping"];
-        }
-        flock(lockDescriptor, LOCK_UN);
-        close(lockDescriptor);
-        return success;
+        PXProfileManifest *manifest = [self activeManifestWithError:error];
+        if (!manifest) return NO;
+        NSMutableDictionary *updated = [[manifest propertyListRepresentation] mutableCopy];
+        updated[@"appIdentities"] = PXAppIdentityPropertyLists(validated);
+        if (![PXProfileManifest manifestWithPropertyList:updated error:error]) return NO;
+        return [self writeManifestPropertyList:updated projections:nil error:error];
     }
 }
 
@@ -1218,340 +1090,40 @@ NSUUID *PXProfileVendorIdentifierForBundleIdentifier(PXProfileManifest *manifest
     if (bundleIdentifier.length == 0) {
         return [self failWithError:error code:13 reason:@"Application identity requires a bundle identifier"];
     }
-    if (![self migrateLegacyProfileIfNeededWithError:error]) {
-        return NO;
-    }
     @synchronized([PXProfileStore class]) {
-        NSString *lockPath = [self.identityDirectory stringByAppendingPathComponent:@".profile-generation.lock"];
-        int lockDescriptor = open(lockPath.fileSystemRepresentation, O_CREAT | O_RDWR, 0600);
-        if (lockDescriptor < 0) {
-            return [self failWithError:error code:11 reason:@"Failed to open Profile generation lock"];
-        }
-        if (flock(lockDescriptor, LOCK_EX) != 0) {
-            close(lockDescriptor);
-            return [self failWithError:error code:12 reason:@"Failed to acquire Profile generation lock"];
-        }
-
-        PXProfileManifest *activeManifest = [self activeManifestWithError:error];
-        if (!activeManifest) {
-            flock(lockDescriptor, LOCK_UN);
-            close(lockDescriptor);
-            return NO;
-        }
-        NSMutableDictionary<NSString *, PXAppIdentityRecord *> *appIdentities =
-            [activeManifest.appIdentities mutableCopy];
-        PXAppIdentityRecord *appIdentity = appIdentities[bundleIdentifier];
+        PXProfileManifest *manifest = [self activeManifestWithError:error];
+        if (!manifest) return NO;
+        NSMutableDictionary<NSString *, PXAppIdentityRecord *> *apps = [manifest.appIdentities mutableCopy];
+        NSMutableDictionary<NSString *, PXAppGroupIdentityRecord *> *groups = [manifest.appGroupIdentities mutableCopy];
+        PXAppIdentityRecord *identity = apps[bundleIdentifier];
         BOOL changed = NO;
-        if (!appIdentity) {
-            appIdentity = [PXAppIdentityRecord identityForProfileSeed:activeManifest.seed
-                                                      bundleIdentifier:bundleIdentifier
-                                                  installIdentifierKeys:installIdentifierKeys];
-            appIdentities[bundleIdentifier] = appIdentity;
+        if (!identity) {
+            apps[bundleIdentifier] = [PXAppIdentityRecord identityForProfileSeed:manifest.seed
+                bundleIdentifier:bundleIdentifier installIdentifierKeys:installIdentifierKeys];
             changed = YES;
         } else {
-            NSMutableSet<NSString *> *mergedInstallKeys = [appIdentity.installIdentifierKeys mutableCopy];
-            [mergedInstallKeys unionSet:installIdentifierKeys];
-            if (![mergedInstallKeys isEqualToSet:appIdentity.installIdentifierKeys]) {
-                NSMutableDictionary<NSString *, id> *identityPropertyList =
-                    [[appIdentity propertyListRepresentation] mutableCopy];
-                identityPropertyList[@"installIdentifierKeys"] =
-                    [mergedInstallKeys.allObjects sortedArrayUsingSelector:@selector(compare:)];
-                appIdentities[bundleIdentifier] = [PXAppIdentityRecord identityWithPropertyList:identityPropertyList];
+            NSMutableSet *keys = [identity.installIdentifierKeys mutableCopy];
+            [keys unionSet:installIdentifierKeys];
+            if (![keys isEqualToSet:identity.installIdentifierKeys]) {
+                NSMutableDictionary *entry = [[identity propertyListRepresentation] mutableCopy];
+                entry[@"installIdentifierKeys"] = [keys.allObjects sortedArrayUsingSelector:@selector(compare:)];
+                apps[bundleIdentifier] = [PXAppIdentityRecord identityWithPropertyList:entry];
                 changed = YES;
             }
         }
-
-        NSMutableDictionary<NSString *, PXAppGroupIdentityRecord *> *appGroupIdentities =
-            [activeManifest.appGroupIdentities mutableCopy];
         for (NSString *groupIdentifier in groupIdentifiers) {
-            if (groupIdentifier.length == 0 || appGroupIdentities[groupIdentifier]) {
-                continue;
-            }
-            appGroupIdentities[groupIdentifier] = [PXAppGroupIdentityRecord
-                identityForProfileSeed:activeManifest.seed
-                groupIdentifier:groupIdentifier];
-            changed = YES;
-        }
-        if (!changed) {
-            flock(lockDescriptor, LOCK_UN);
-            close(lockDescriptor);
-            return YES;
-        }
-
-        NSMutableDictionary<NSString *, id> *updatedPropertyList =
-            [[activeManifest propertyListRepresentation] mutableCopy];
-        updatedPropertyList[@"appIdentities"] = PXAppIdentityPropertyLists(appIdentities);
-        updatedPropertyList[@"appGroupIdentities"] = PXAppGroupIdentityPropertyLists(appGroupIdentities);
-        PXProfileManifest *updatedManifest = [PXProfileManifest manifestWithPropertyList:updatedPropertyList error:error];
-        NSString *manifestPath = [[self.identityDirectory stringByAppendingPathComponent:@"profile_manifest.plist"]
-            stringByResolvingSymlinksInPath];
-        BOOL success = updatedManifest && [updatedPropertyList writeToFile:manifestPath atomically:YES];
-        if (!success && updatedManifest) {
-            [self failWithError:error code:14 reason:@"Failed to persist application identity mapping"];
-        }
-        flock(lockDescriptor, LOCK_UN);
-        close(lockDescriptor);
-        return success;
-    }
-}
-
-- (BOOL)migrateLegacyProfileIfNeededWithError:(NSError * _Nullable * _Nullable)error {
-    @synchronized([PXProfileStore class]) {
-        NSString *activePath = [self.identityDirectory stringByAppendingPathComponent:@"profile_active"];
-        BOOL isSymlink = NO;
-        if ([self pathExistsWithoutFollowingSymlinks:activePath isSymlink:&isSymlink] && isSymlink) {
-            NSString *manifestPath = [[self.identityDirectory stringByAppendingPathComponent:@"profile_manifest.plist"]
-                stringByResolvingSymlinksInPath];
-            NSDictionary<NSString *, id> *storedPropertyList =
-                [NSDictionary dictionaryWithContentsOfFile:manifestPath];
-            if ([storedPropertyList[@"schemaVersion"] integerValue] == 3 ||
-                [storedPropertyList[@"schemaVersion"] integerValue] == 4) {
-                PXProfileManifest *migratedManifest = [PXProfileManifest
-                    manifestWithPropertyList:storedPropertyList
-                    error:error];
-                NSString *regionProjectionPath = [[self.identityDirectory
-                    stringByAppendingPathComponent:@"region.plist"] stringByResolvingSymlinksInPath];
-                NSDictionary<NSString *, id> *regionProjection = migratedManifest ? @{
-                    @"generationID": migratedManifest.generationID,
-                    @"value": migratedManifest.region,
-                    @"lastUpdated": migratedManifest.generatedAt
-                } : nil;
-                BOOL persistedRegionProjection = migratedManifest &&
-                    [regionProjection writeToFile:regionProjectionPath atomically:YES];
-                BOOL persistedManifest = persistedRegionProjection &&
-                    [[migratedManifest propertyListRepresentation] writeToFile:manifestPath atomically:YES];
-                if (!persistedManifest) {
-                    if (migratedManifest) {
-                        [self failWithError:error code:15 reason:@"Failed to persist Profile schema migration"];
-                    }
-                    return NO;
-                }
-            }
-            [self removeRetiredAppIdentityProjections];
-            return YES;
-        }
-
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSMutableDictionary<NSString *, NSDictionary<NSString *, id> *> *legacyFiles = [NSMutableDictionary dictionary];
-        NSMutableArray<NSString *> *emptyLegacyProjectionPaths = [NSMutableArray array];
-        for (NSString *fileName in [self legacyProjectionFileNames]) {
-            if ([fileName isEqualToString:@"profile_manifest.plist"]) {
-                continue;
-            }
-            NSString *path = [self.identityDirectory stringByAppendingPathComponent:fileName];
-            NSDictionary *propertyList = [NSDictionary dictionaryWithContentsOfFile:path];
-            if ([propertyList isKindOfClass:[NSDictionary class]]) {
-                if (propertyList.count > 0) {
-                    legacyFiles[fileName] = propertyList;
-                } else {
-                    [emptyLegacyProjectionPaths addObject:path];
-                }
+            if (groupIdentifier.length && !groups[groupIdentifier]) {
+                groups[groupIdentifier] = [PXAppGroupIdentityRecord identityForProfileSeed:manifest.seed
+                    groupIdentifier:groupIdentifier];
+                changed = YES;
             }
         }
-        if (legacyFiles.count == 0) {
-            for (NSString *emptyLegacyProjectionPath in emptyLegacyProjectionPaths) {
-                if (![fileManager removeItemAtPath:emptyLegacyProjectionPath error:error]) {
-                    return NO;
-                }
-            }
-            return YES;
-        }
-
-        NSError *serializationError = nil;
-        NSData *legacySeed = [NSPropertyListSerialization dataWithPropertyList:legacyFiles
-                                                                        format:NSPropertyListBinaryFormat_v1_0
-                                                                       options:0
-                                                                         error:&serializationError];
-        if (!legacySeed) {
-            if (error) *error = serializationError;
-            return NO;
-        }
-        PXDeterministicRandomSource *random = [[PXDeterministicRandomSource alloc] initWithSeed:legacySeed];
-
-        NSMutableDictionary *device = [legacyFiles[@"device_model.plist"] mutableCopy] ?: [NSMutableDictionary dictionary];
-        device[@"identifier"] = device[@"identifier"] ?: device[@"value"] ?: @"";
-        NSMutableDictionary *operatingSystem = [legacyFiles[@"ios_version.plist"] mutableCopy] ?: [NSMutableDictionary dictionary];
-        NSNumber *majorVersion = operatingSystem[@"majorVersion"];
-        if (!majorVersion && [operatingSystem[@"version"] isKindOfClass:[NSString class]]) {
-            majorVersion = @([[operatingSystem[@"version"] componentsSeparatedByString:@"."].firstObject integerValue]);
-        }
-        if (!device[@"supportedIOSMajorVersions"] && majorVersion) {
-            device[@"supportedIOSMajorVersions"] = @[majorVersion];
-        }
-        if (majorVersion) {
-            operatingSystem[@"majorVersion"] = majorVersion;
-        }
-
-        NSMutableDictionary *network = [legacyFiles[@"network_settings.plist"] mutableCopy] ?: [NSMutableDictionary dictionary];
-        NSDictionary *legacyCarrier = legacyFiles[@"carrier_details.plist"] ?: @{};
-        NSDictionary *legacyWiFi = legacyFiles[@"wifi_info.plist"] ?: @{};
-        [legacyCarrier enumerateKeysAndObjectsUsingBlock:^(NSString *key, id value, BOOL *stop) {
-            (void)stop;
-            if (!network[key] && value) network[key] = value;
-        }];
-        NSString *radioTechnology = network[@"radioTechnology"] ?: network[@"radioAccessTechnology"] ?: @"CTRadioAccessTechnologyLTE";
-        network[@"radioTechnology"] = radioTechnology;
-        network[@"supportedRadioTechnologies"] = network[@"supportedRadioTechnologies"] ?: @[radioTechnology];
-        network[@"transport"] = network[@"transport"] ?: @"cellular";
-        network[@"serviceIdentifier"] = network[@"serviceIdentifier"] ?: [NSString stringWithFormat:@"PX-%@", [random uuidString]];
-        network[@"ssid"] = network[@"ssid"] ?: legacyWiFi[@"ssid"] ?: @"";
-        network[@"bssid"] = network[@"bssid"] ?: legacyWiFi[@"bssid"] ?: @"";
-        if ([network[@"carrierID"] length] == 0) {
-            for (NSDictionary<NSString *, id> *catalogCarrier in PXCarrierCatalog()) {
-                if ([catalogCarrier[@"name"] isEqualToString:network[@"carrierName"]] &&
-                    [catalogCarrier[@"mcc"] isEqualToString:network[@"mcc"]] &&
-                    [catalogCarrier[@"mnc"] isEqualToString:network[@"mnc"]]) {
-                    network[@"carrierID"] = catalogCarrier[@"carrierID"];
-                    break;
-                }
-            }
-        }
-        if (!device[@"supports5G"]) {
-            device[@"supports5G"] = @(![radioTechnology isEqualToString:@"CTRadioAccessTechnologyLTE"]);
-        }
-
-        NSDictionary *legacyIdentifiers = legacyFiles[@"device_ids.plist"] ?: @{};
-        NSDictionary<NSString *, NSString *> *legacyIdentifierFiles = @{
-            @"IDFA": @"advertising_id.plist",
-            @"IDFV": @"vendor_id.plist",
-            @"DyldCacheUUID": @"dyld_cache_uuid.plist",
-            @"PasteboardUUID": @"pasteboard_uuid.plist",
-            @"KeychainUUID": @"keychain_uuid.plist",
-            @"UserDefaultsUUID": @"userdefaults_uuid.plist",
-            @"CoreDataUUID": @"coredata_uuid.plist"
-        };
-        NSString *(^identifierOrFallback)(NSString *) = ^NSString *(NSString *legacyKey) {
-            NSString *value = legacyIdentifiers[legacyKey];
-            if (!value) {
-                value = legacyFiles[legacyIdentifierFiles[legacyKey]][@"value"];
-            }
-            if ([[NSUUID alloc] initWithUUIDString:value]) {
-                return value;
-            }
-            return [random uuidString];
-        };
-        NSDictionary *identifiers = @{
-            @"deviceName": legacyIdentifiers[@"DeviceName"] ?: legacyFiles[@"device_name.plist"][@"value"] ?: device[@"name"] ?: @"",
-            @"idfa": identifierOrFallback(@"IDFA"),
-            @"idfv": identifierOrFallback(@"IDFV"),
-            @"dyldCacheUUID": identifierOrFallback(@"DyldCacheUUID"),
-            @"pasteboardUUID": identifierOrFallback(@"PasteboardUUID"),
-            @"keychainUUID": identifierOrFallback(@"KeychainUUID"),
-            @"userDefaultsUUID": identifierOrFallback(@"UserDefaultsUUID"),
-            @"coreDataUUID": identifierOrFallback(@"CoreDataUUID"),
-            @"serialNumber": legacyIdentifiers[@"SerialNumber"] ?: legacyFiles[@"serial_number.plist"][@"value"] ?: @"",
-            @"imei": legacyIdentifiers[@"IMEI"] ?: legacyFiles[@"imei.plist"][@"value"] ?: @"",
-            @"meid": legacyIdentifiers[@"MEID"] ?: legacyFiles[@"meid.plist"][@"value"] ?: @""
-        };
-
-        NSString *legacyBootUUID = legacyIdentifiers[@"SystemBootUUID"] ?: legacyFiles[@"system_boot_uuid.plist"][@"value"];
-        if (![[NSUUID alloc] initWithUUIDString:legacyBootUUID]) {
-            legacyBootUUID = [random uuidString];
-        }
-        NSDictionary *legacyBootTime = legacyFiles[@"boot_time.plist"] ?: @{};
-        NSDate *bootTime = [legacyBootTime[@"value"] isKindOfClass:[NSDate class]]
-            ? legacyBootTime[@"value"]
-            : nil;
-        if (!bootTime && [legacyIdentifiers[@"BootTime"] doubleValue] > 0) {
-            bootTime = [NSDate dateWithTimeIntervalSince1970:[legacyIdentifiers[@"BootTime"] doubleValue]];
-        }
-        NSDate *referenceDate = [legacyBootTime[@"lastUpdated"] isKindOfClass:[NSDate class]]
-            ? legacyBootTime[@"lastUpdated"]
-            : nil;
-        if (!bootTime) {
-            referenceDate = [NSDate dateWithTimeIntervalSince1970:0];
-            NSTimeInterval bootMetadataAge = (12 * 3600) + (NSTimeInterval)[random indexWithUpperBound:36 * 3600 + 1];
-            bootTime = [referenceDate dateByAddingTimeInterval:-bootMetadataAge];
-        } else if (!referenceDate || [referenceDate timeIntervalSinceDate:bootTime] < 12 * 3600 ||
-                   [referenceDate timeIntervalSinceDate:bootTime] > 48 * 3600) {
-            referenceDate = [bootTime dateByAddingTimeInterval:12 * 3600];
-        }
-        PXVirtualRuntimeSession *virtualSession = [[PXVirtualRuntimeSession alloc]
-            initWithBootUUID:legacyBootUUID
-            bootTime:bootTime];
-        NSDictionary *legacyLocation = legacyFiles[@"location.plist"] ?: @{};
-        NSDictionary *location = [legacyLocation[@"value"] isKindOfClass:[NSDictionary class]]
-            ? legacyLocation[@"value"]
-            : legacyLocation;
-
-        PXProfileManifest *manifest = [[PXProfileManifest alloc] init];
-        manifest.schemaVersion = 5;
-        manifest.generationID = [random uuidString];
-        manifest.seed = [legacySeed base64EncodedStringWithOptions:0];
-        manifest.generatedAt = referenceDate;
-        manifest.device = [device copy];
-        manifest.operatingSystem = [operatingSystem copy];
-        manifest.identifiers = identifiers;
-        manifest.network = [network copy];
-        NSDictionary *legacyRegion = legacyFiles[@"region.plist"] ?: @{};
-        NSDictionary *legacyRegionValue = [legacyRegion[@"value"] isKindOfClass:[NSDictionary class]]
-            ? legacyRegion[@"value"]
-            : legacyRegion;
-        PXRegionIdentity *migratedRegion = PXRegionIdentityByCompletingPropertyList(
-            legacyRegionValue,
-            network[@"isoCountryCode"] ?: @"",
-            legacySeed);
-        manifest.region = [migratedRegion propertyListRepresentation] ?: @{};
-        manifest.location = location ?: @{};
-        manifest.appIdentities = @{};
-        manifest.appGroupIdentities = @{};
-        manifest.fieldSourcePolicy = PXProfileFieldSourcePolicy();
-        manifest.virtualSession = virtualSession;
-
-        NSError *validationError = nil;
-        if (![manifest validateWithError:&validationError]) {
-            if (error) *error = validationError;
-            return NO;
-        }
-
-        NSString *backupDirectory = [self.identityDirectory stringByAppendingPathComponent:
-            [NSString stringWithFormat:@".profile-legacy-backup-%@", NSUUID.UUID.UUIDString]];
-        if (![fileManager createDirectoryAtPath:backupDirectory
-                    withIntermediateDirectories:NO
-                                     attributes:nil
-                                          error:error]) {
-            return NO;
-        }
-
-        NSMutableArray<NSString *> *movedFileNames = [NSMutableArray array];
-        for (NSString *fileName in [self legacyProjectionFileNames]) {
-            NSString *sourcePath = [self.identityDirectory stringByAppendingPathComponent:fileName];
-            BOOL sourceIsSymlink = NO;
-            if (![self pathExistsWithoutFollowingSymlinks:sourcePath isSymlink:&sourceIsSymlink] || sourceIsSymlink) {
-                continue;
-            }
-            NSString *backupPath = [backupDirectory stringByAppendingPathComponent:fileName];
-            if (![fileManager moveItemAtPath:sourcePath toPath:backupPath error:error]) {
-                for (NSString *movedFileName in movedFileNames) {
-                    [fileManager moveItemAtPath:[backupDirectory stringByAppendingPathComponent:movedFileName]
-                                        toPath:[self.identityDirectory stringByAppendingPathComponent:movedFileName]
-                                         error:nil];
-                }
-                [fileManager removeItemAtPath:backupDirectory error:nil];
-                return NO;
-            }
-            [movedFileNames addObject:fileName];
-        }
-
-        if ([self performPromotionOfManifest:manifest error:error]) {
-            [fileManager removeItemAtPath:backupDirectory error:nil];
-            return YES;
-        }
-
-        for (NSString *fileName in [self legacyProjectionFileNames]) {
-            NSString *projectionPath = [self.identityDirectory stringByAppendingPathComponent:fileName];
-            BOOL projectionIsSymlink = NO;
-            if ([self pathExistsWithoutFollowingSymlinks:projectionPath isSymlink:&projectionIsSymlink] && projectionIsSymlink) {
-                unlink(projectionPath.fileSystemRepresentation);
-            }
-        }
-        for (NSString *movedFileName in movedFileNames) {
-            [fileManager moveItemAtPath:[backupDirectory stringByAppendingPathComponent:movedFileName]
-                                toPath:[self.identityDirectory stringByAppendingPathComponent:movedFileName]
-                                 error:nil];
-        }
-        [fileManager removeItemAtPath:backupDirectory error:nil];
-        return NO;
+        if (!changed) return YES;
+        NSMutableDictionary *updated = [[manifest propertyListRepresentation] mutableCopy];
+        updated[@"appIdentities"] = PXAppIdentityPropertyLists(apps);
+        updated[@"appGroupIdentities"] = PXAppGroupIdentityPropertyLists(groups);
+        if (![PXProfileManifest manifestWithPropertyList:updated error:error]) return NO;
+        return [self writeManifestPropertyList:updated projections:nil error:error];
     }
 }
 

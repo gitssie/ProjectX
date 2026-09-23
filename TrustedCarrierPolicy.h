@@ -4,7 +4,6 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface PXTrustedCarrierPolicyStore : NSObject
 
-- (instancetype)initWithProfileDirectory:(NSString *)profileDirectory;
 - (nullable NSSet<NSString *> *)trustedCarrierIDsWithError:(NSError * _Nullable * _Nullable)error;
 - (BOOL)saveTrustedCarrierIDs:(NSSet<NSString *> *)trustedCarrierIDs
                          error:(NSError * _Nullable * _Nullable)error;

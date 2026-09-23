@@ -7,10 +7,9 @@
 static NSDictionary<NSString *, id> *freshRequestPropertyList(NSString *targetBundleID) {
     NSDate *createdAt = [NSDate dateWithTimeIntervalSince1970:1000];
     return @{
-        @"schemaVersion": @1,
+        @"schemaVersion": @(PXKeychainCommandSchemaVersion),
         @"requestID": @"11111111-1111-4111-8111-111111111111",
         @"targetBundleID": targetBundleID,
-        @"profileID": @"22222222-2222-4222-8222-222222222222",
         @"generationID": @"33333333-3333-4333-8333-333333333333",
         @"operation": @"clear-keychain",
         @"createdAt": createdAt,
@@ -25,7 +24,6 @@ static PXKeychainCommandContext *context(NSString *bundleID,
                                          BOOL extensionEnabled) {
     return [[PXKeychainCommandContext alloc]
         initWithBundleIdentifier:bundleID
-                       profileID:@"22222222-2222-4222-8222-222222222222"
                     generationID:@"33333333-3333-4333-8333-333333333333"
               applicationEnabled:applicationEnabled
                 extensionEnabled:extensionEnabled];
@@ -73,30 +71,11 @@ static void testOnlyExactEnabledScopedBundleAcceptsFreshRequest(void) {
                error:nil]);
 }
 
-static void testLegacyProfileIdentifierRemainsBoundAndPathSafe(void) {
+static void testOldProfileIdentifierIsRejected(void) {
     NSMutableDictionary<NSString *, id> *propertyList =
         [freshRequestPropertyList(@"com.example.target") mutableCopy];
     propertyList[@"profileID"] = @"0";
-    PXKeychainCommandRequest *request = [PXKeychainCommandRequest
-        requestWithPropertyList:propertyList
-        error:nil];
-    assert(request != nil);
-    PXKeychainCommandContext *legacyContext = [[PXKeychainCommandContext alloc]
-        initWithBundleIdentifier:@"com.example.target"
-                       profileID:@"0"
-                    generationID:request.generationID
-              applicationEnabled:YES
-                extensionEnabled:NO];
-    assert([[[PXKeychainCommandValidator alloc] init]
-        claimRequest:request
-             context:legacyContext
-                 now:[NSDate dateWithTimeIntervalSince1970:1010]
-               error:nil]);
-
-    for (NSString *unsafeProfileID in @[@"", @".", @"..", @".hidden", @"../0", @"0/child", @"0\\child"]) {
-        propertyList[@"profileID"] = unsafeProfileID;
-        assert([PXKeychainCommandRequest requestWithPropertyList:propertyList error:nil] == nil);
-    }
+    assert([PXKeychainCommandRequest requestWithPropertyList:propertyList error:nil] == nil);
 }
 
 static void testReceiverRegistersBeforeSelectionButNeverInProtectedProcesses(void) {
@@ -106,7 +85,7 @@ static void testReceiverRegistersBeforeSelectionButNeverInProtectedProcesses(voi
     assert(!PXKeychainCommandReceiverShouldRegisterForBundleIdentifier(@""));
 }
 
-static void testExpiredReplayAndWrongProfileRequestsNeverExecute(void) {
+static void testExpiredReplayAndWrongGenerationRequestsNeverExecute(void) {
     PXKeychainCommandRequest *request = [PXKeychainCommandRequest
         requestWithPropertyList:freshRequestPropertyList(@"com.example.target")
         error:nil];
@@ -117,21 +96,8 @@ static void testExpiredReplayAndWrongProfileRequestsNeverExecute(void) {
                              now:[NSDate dateWithTimeIntervalSince1970:1031]
                            error:nil]);
 
-    PXKeychainCommandContext *wrongProfile = [[PXKeychainCommandContext alloc]
-        initWithBundleIdentifier:@"com.example.target"
-                       profileID:@"44444444-4444-4444-8444-444444444444"
-                    generationID:request.generationID
-              applicationEnabled:YES
-                extensionEnabled:NO];
-    assert(![[[PXKeychainCommandValidator alloc] init]
-        claimRequest:request
-             context:wrongProfile
-                 now:[NSDate dateWithTimeIntervalSince1970:1010]
-               error:nil]);
-
     PXKeychainCommandContext *wrongGeneration = [[PXKeychainCommandContext alloc]
         initWithBundleIdentifier:@"com.example.target"
-                       profileID:request.profileID
                     generationID:@"55555555-5555-4555-8555-555555555555"
               applicationEnabled:YES
                 extensionEnabled:NO];
@@ -844,12 +810,10 @@ static void testVerificationFailureIsNotReportedAsSuccessfulDeletion(void) {
 @implementation RecordingTransport
 
 - (void)waitForReadyBundleIdentifier:(NSString *)bundleIdentifier
-                            profileID:(NSString *)profileID
                          generationID:(NSString *)generationID
                               timeout:(NSTimeInterval)timeout
                            completion:(void (^)(BOOL, NSError *))completion {
     assert([bundleIdentifier isEqualToString:@"com.example.target"]);
-    assert(profileID.length > 0);
     assert(generationID.length > 0);
     assert(timeout > 0);
     [self.events addObject:@"ready"];
@@ -985,26 +949,21 @@ static void testFileStoreUsesAtomicExactPathsAndOneShotClaims(void) {
     assert(![store claimRequestID:@"../../escape" error:nil]);
 
     assert([store writeReadinessForBundleIdentifier:@"com.example.target"
-                                          profileID:request.profileID
                                        generationID:request.generationID
                                                 now:[NSDate dateWithTimeIntervalSince1970:1010]
                                               error:nil]);
     assert([store isReadyBundleIdentifier:@"com.example.target"
-                                profileID:request.profileID
                              generationID:request.generationID
                                       now:[NSDate dateWithTimeIntervalSince1970:1015]
                               maximumAge:10]);
     assert(![store isReadyBundleIdentifier:@"com.example.other"
-                                 profileID:request.profileID
                               generationID:request.generationID
                                        now:[NSDate dateWithTimeIntervalSince1970:1015]
                                maximumAge:10]);
     assert(![store isReadyBundleIdentifier:@"com.example.target"
-                                 profileID:request.profileID
                               generationID:request.generationID
                                        now:[NSDate dateWithTimeIntervalSince1970:1030]
                                maximumAge:10]);
-
     NSArray<NSString *> *rootContents = [[NSFileManager defaultManager]
         contentsOfDirectoryAtPath:rootDirectory
         error:nil];
@@ -1079,7 +1038,6 @@ static void testFileTransportReadinessAndAcknowledgementAreAsynchronous(void) {
         requestWithPropertyList:freshRequestPropertyList(@"com.example.target")
         error:nil];
     assert([store writeReadinessForBundleIdentifier:request.targetBundleID
-                                          profileID:request.profileID
                                        generationID:request.generationID
                                                 now:[NSDate date]
                                               error:nil]);
@@ -1089,7 +1047,6 @@ static void testFileTransportReadinessAndAcknowledgementAreAsynchronous(void) {
         initWithFileStore:store pollingQueue:pollingQueue];
     dispatch_semaphore_t ready = dispatch_semaphore_create(0);
     [transport waitForReadyBundleIdentifier:request.targetBundleID
-                                  profileID:request.profileID
                                generationID:request.generationID
                                     timeout:1
                                  completion:^(BOOL isReady, NSError *error) {
@@ -1181,7 +1138,6 @@ static void testMissingReceiverReadinessTimesOutBeforeRequestIsQueued(void) {
         error:nil];
     dispatch_semaphore_t completed = dispatch_semaphore_create(0);
     [transport waitForReadyBundleIdentifier:request.targetBundleID
-                                  profileID:request.profileID
                                generationID:request.generationID
                                     timeout:0.1
                                  completion:^(BOOL ready, NSError *error) {
@@ -1226,7 +1182,6 @@ static void testFreshRequestRoundTripsSynchronizablePolicy(void) {
     NSDate *now = [NSDate dateWithTimeIntervalSince1970:1000];
     PXKeychainCommandRequest *request = [PXKeychainCommandRequest
         freshRequestForBundleIdentifier:@"com.example.target"
-        profileID:@"22222222-2222-4222-8222-222222222222"
         generationID:@"33333333-3333-4333-8333-333333333333"
         includeSharedAccessGroups:NO
         includeSynchronizableItems:YES
@@ -1344,9 +1299,9 @@ static void testExecutorDeletesSynchronizableItemsWhenRequested(void) {
 int main(void) {
     @autoreleasepool {
         testOnlyExactEnabledScopedBundleAcceptsFreshRequest();
-        testLegacyProfileIdentifierRemainsBoundAndPathSafe();
+        testOldProfileIdentifierIsRejected();
         testReceiverRegistersBeforeSelectionButNeverInProtectedProcesses();
-        testExpiredReplayAndWrongProfileRequestsNeverExecute();
+        testExpiredReplayAndWrongGenerationRequestsNeverExecute();
         testRequestCannotSupplyAccessGroupsOrQueries();
         testDeletionPlanUsesOnlyApprovedClassesAndDerivedApplicationGroups();
         testSharedEntitlementGroupsRequireExplicitFamilyPolicy();

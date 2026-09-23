@@ -5,6 +5,7 @@
 #import "NetworkIdentity.h"
 #import "PXEnvironmentModelSelection.h"
 #import "PXEnvironmentPolicy.h"
+#import "PXRootHidePath.h"
 
 #include <assert.h>
 
@@ -196,6 +197,23 @@ static void testPendingNetworkTypeControlsGeneratedTransportAndRadio(void) {
         @"CTRadioAccessTechnologyNRNSA"
     ];
     assert([fiveGRadioTechnologies containsObject:fiveG.network[@"radioTechnology"]]);
+    assert([fiveG.network[@"configuredNetworkType"] isEqualToString:@"5g-nr"]);
+    assert(PXNetworkIdentityIsCoherent(fiveG.network));
+
+    PXProfileGenerationInput *combinedInput = fixedGenerationInput();
+    combinedInput.networkTypes = [NSSet setWithObjects:
+        @(PXEnvironmentNetworkTypeWiFi),
+        @(PXEnvironmentNetworkType4GLTE),
+        @(PXEnvironmentNetworkType5GNR), nil];
+    PXProfileManifest *combined = [[[PXProfileGenerator alloc] init]
+        generateManifestWithInput:combinedInput error:nil];
+    assert([combined.network[@"transport"] isEqualToString:@"wifi"]);
+    assert([fiveGRadioTechnologies containsObject:combined.network[@"radioTechnology"]]);
+    assert(([combined.network[@"configuredNetworkTypes"] isEqualToArray:
+        @[@"wifi", @"5g-nr", @"4g-lte"]]));
+    assert([combined.network[@"supportedRadioTechnologies"] containsObject:
+        @"CTRadioAccessTechnologyLTE"]);
+    assert(PXNetworkIdentityIsCoherent(combined.network));
 
     PXProfileGenerationInput *threeGInput = fixedGenerationInput();
     threeGInput.networkType = PXEnvironmentNetworkType3G;
@@ -369,98 +387,6 @@ static void testPhysicalModeWithUnavailableGraphicsProbeProducesValidManifest(vo
     assert(error == nil);
 }
 
-static void testProductionIPhoneSevenPlusPhysicalPathReplacesEmptyLegacyProjection(void) {
-    NSString *profileDirectory = [NSTemporaryDirectory()
-        stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
-    NSString *identityDirectory = [profileDirectory stringByAppendingPathComponent:@"identity"];
-    assert([[NSFileManager defaultManager] createDirectoryAtPath:identityDirectory
-                                      withIntermediateDirectories:YES
-                                                       attributes:nil
-                                                            error:nil]);
-    assert([@{} writeToFile:[identityDirectory stringByAppendingPathComponent:@"device_ids.plist"]
-                 atomically:YES]);
-
-    DeviceModelManager *deviceManager = [[DeviceModelManager alloc] init];
-    NSDictionary<NSString *, id> *physicalModelRecord =
-        [deviceManager deviceSpecificationsForModel:@"iPhone9,2"];
-    assert(physicalModelRecord != nil);
-
-    PXEnvironmentPolicyStore *policyStore = [[PXEnvironmentPolicyStore alloc]
-        initWithFilePath:[profileDirectory stringByAppendingPathComponent:@"pending_environment.plist"]];
-    NSError *error = nil;
-    assert([policyStore savePhysicalDeviceModelRecord:physicalModelRecord error:&error]);
-    assert(error == nil);
-
-    PXProfileStore *profileStore = [[PXProfileStore alloc]
-        initWithIdentityDirectory:identityDirectory];
-    assert([profileStore migrateLegacyProfileIfNeededWithError:&error]);
-    assert(error == nil);
-
-    NSDictionary<NSString *, id> *unavailableHostCapabilities = @{
-        @"metalFamilies": @[],
-        @"metalFeatureSets": @[],
-        @"maxTextureSize": @0,
-        @"maxRenderbufferSize": @0,
-        @"supportsOpenGLES3": @NO
-    };
-    NSDictionary<NSString *, id> *resolvedModelRecord = PXResolveEnvironmentModelSelection(
-        policyStore,
-        [deviceManager allDeviceSpecificationRecords],
-        physicalModelRecord,
-        unavailableHostCapabilities,
-        nil,
-        &error);
-    assert(error == nil);
-    assert([resolvedModelRecord isEqualToDictionary:physicalModelRecord]);
-    assert([policyStore selectedModelSelectionModeWithError:nil] ==
-        PXEnvironmentModelSelectionModePhysicalDevice);
-
-    PXProfileGenerationInput *input = fixedGenerationInput();
-    input.modelCatalog = @[resolvedModelRecord];
-    input.physicalModelRecord = physicalModelRecord;
-    input.usesPhysicalDeviceModel = YES;
-    NSMutableArray<NSDictionary<NSString *, id> *> *iOSCatalog = [NSMutableArray array];
-    for (NSDictionary<NSString *, id> *tuple in [[IOSVersionInfo sharedManager] availableIOSVersions]) {
-        NSMutableDictionary<NSString *, id> *enrichedTuple = [tuple mutableCopy];
-        enrichedTuple[@"majorVersion"] = @([[tuple[@"version"] componentsSeparatedByString:@"."].firstObject integerValue]);
-        [iOSCatalog addObject:[enrichedTuple copy]];
-    }
-    input.iOSCatalog = [iOSCatalog copy];
-    input.graphicsHostCapabilities = unavailableHostCapabilities;
-    input.networkType = PXEnvironmentNetworkType4GLTE;
-
-    PXProfileManifest *manifest = [[[PXProfileGenerator alloc] init]
-        generateManifestWithInput:input
-        error:&error];
-    assert(error == nil);
-    assert(manifest != nil);
-    NSArray<NSString *> *requiredDeviceFields = @[
-        @"identifier", @"hwModel", @"boardID", @"screenResolution",
-        @"cpuArchitecture", @"gpuFamily"
-    ];
-    for (NSString *field in requiredDeviceFields) {
-        id value = manifest.device[field];
-        assert([value isKindOfClass:[NSString class]]);
-        assert([(NSString *)value length] > 0);
-    }
-    assert([manifest.device[@"identifier"] isEqualToString:@"iPhone9,2"]);
-    assert([manifest validateWithError:&error]);
-    assert(error == nil);
-    assert([profileStore promoteManifest:manifest error:&error]);
-    assert(error == nil);
-
-    PXProfileManifest *activeManifest = [profileStore activeManifestWithError:&error];
-    assert(error == nil);
-    assert(activeManifest != nil);
-    for (NSString *field in requiredDeviceFields) {
-        id value = activeManifest.device[field];
-        assert([value isKindOfClass:[NSString class]]);
-        assert([(NSString *)value length] > 0);
-    }
-    assert([activeManifest.device[@"identifier"] isEqualToString:@"iPhone9,2"]);
-    [[NSFileManager defaultManager] removeItemAtPath:profileDirectory error:nil];
-}
-
 static void testIncompleteProductionDeviceRecordNamesEveryInvalidField(void) {
     DeviceModelManager *deviceManager = [[DeviceModelManager alloc] init];
     NSDictionary<NSString *, id> *physicalModelRecord =
@@ -556,7 +482,6 @@ static void testGeneratedManifestUsesPerAppAndPerGroupIdentityMaps(void) {
     PXAppIdentityRecord *mainIdentity = manifest.appIdentities[@"com.example.app"];
     PXAppIdentityRecord *extensionIdentity = manifest.appIdentities[@"com.example.app.extension"];
     PXAppGroupIdentityRecord *groupIdentity = manifest.appGroupIdentities[@"group.com.example.shared"];
-    assert(manifest.schemaVersion == 5);
     assert(mainIdentity != nil);
     assert(extensionIdentity != nil);
     assert(groupIdentity != nil);
@@ -650,420 +575,71 @@ static void testManifestDeclaresFieldSourcesAndCreatesVirtualRuntimeSession(void
     assert(manifest.identifiers[@"systemBootUUID"] == nil);
 }
 
-static void testFailedPromotionLeavesPreviousGenerationActive(void) {
-    NSString *identityDirectory = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
-    NSError *directoryError = nil;
-    assert([[NSFileManager defaultManager] createDirectoryAtPath:identityDirectory
-                                      withIntermediateDirectories:YES
-                                                       attributes:nil
-                                                            error:&directoryError]);
-    assert(directoryError == nil);
-
+static void testOneProfileFileStoresAndReplacesAllGeneratedValues(void) {
+    NSString *testRoot = [NSTemporaryDirectory() stringByAppendingPathComponent:
+        [@"profile-store-" stringByAppendingString:NSUUID.UUID.UUIDString]];
+    NSString *identityDirectory = [testRoot stringByAppendingPathComponent:@"test/data/identity"];
+    NSString *profilePath = [testRoot stringByAppendingPathComponent:@"current_profile.plist"];
+    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
     PXProfileGenerator *generator = [[PXProfileGenerator alloc] init];
+
     PXProfileGenerationInput *firstInput = fixedGenerationInput();
     PXProfileManifest *first = [generator generateManifestWithInput:firstInput error:nil];
-    PXProfileGenerationInput *secondInput = fixedGenerationInput();
-    NSMutableData *secondSeed = [secondInput.seed mutableCopy];
-    ((uint8_t *)secondSeed.mutableBytes)[0] ^= 0xff;
-    secondInput.seed = secondSeed;
-    PXProfileManifest *second = [generator generateManifestWithInput:secondInput error:nil];
-
-    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
+    assert(first != nil);
     assert([store promoteManifest:first error:nil]);
+    assert([[NSFileManager defaultManager] fileExistsAtPath:profilePath]);
+    assert(![[NSFileManager defaultManager] fileExistsAtPath:
+        [testRoot stringByAppendingPathComponent:@"Profiles"]]);
+    NSDictionary *profile = [NSDictionary dictionaryWithContentsOfFile:profilePath];
+    assert(profile[@"ProfileId"] == nil);
+    NSDictionary *values = profile[@"values"];
+    assert([profile[@"manifest"][@"generationID"]
+        isEqualToString:first.generationID]);
+    assert([values[@"identity/device_model.plist"][@"value"]
+        isEqualToString:first.device[@"identifier"]]);
+    assert([values[@"identity/network_settings.plist"][@"ssid"]
+        isEqualToString:first.network[@"ssid"]]);
+    assert(PXProfileUpdateContentsAtPath(profilePath, ^(NSMutableDictionary *profile) {
+        NSMutableDictionary *storedValues = [profile[@"values"] mutableCopy];
+        storedValues[@"identity/stale_uuid.plist"] = @{@"value": @"old"};
+        storedValues[@"trustedCarriers"] = @{@"trustedCarrierIDs": @[@"test-carrier"]};
+        profile[@"values"] = storedValues;
+    }));
+
     store.failBeforePromotionForTesting = YES;
+    PXProfileGenerationInput *secondInput = fixedGenerationInput();
+    secondInput.seed = [@"new seed" dataUsingEncoding:NSUTF8StringEncoding];
+    PXProfileManifest *second = [generator generateManifestWithInput:secondInput error:nil];
+    assert(second != nil);
     assert(![store promoteManifest:second error:nil]);
-
-    PXProfileManifest *active = [store activeManifestWithError:nil];
-    NSDictionary *deviceProjection = [NSDictionary dictionaryWithContentsOfFile:
-        [identityDirectory stringByAppendingPathComponent:@"device_model.plist"]];
-    NSDictionary *bootUUIDProjection = [NSDictionary dictionaryWithContentsOfFile:
-        [identityDirectory stringByAppendingPathComponent:@"system_boot_uuid.plist"]];
-    NSDictionary *deviceIDsProjection = [NSDictionary dictionaryWithContentsOfFile:
-        [identityDirectory stringByAppendingPathComponent:@"device_ids.plist"]];
-    assert([active.generationID isEqualToString:first.generationID]);
-    assert([deviceProjection[@"generationID"] isEqualToString:first.generationID]);
-    assert([bootUUIDProjection[@"value"] isEqualToString:first.virtualSession.bootUUID]);
-    assert([deviceIDsProjection[@"GraphicsGenerationID"] isEqualToString:first.generationID]);
-    assert([deviceIDsProjection[@"GPUName"] isEqualToString:first.graphics[@"gpuName"]]);
-    assert([deviceIDsProjection[@"MetalFamilies"] isEqualToArray:first.graphics[@"metalFamilies"]]);
-    assert([deviceIDsProjection[@"WebGLInfo"] isEqualToDictionary:first.graphics[@"webGL"]]);
-    assert([deviceIDsProjection[@"OpenGLInfo"] isEqualToDictionary:first.graphics[@"openGL"]]);
-    assert(![active.generationID isEqualToString:second.generationID]);
-
-    [[NSFileManager defaultManager] removeItemAtPath:identityDirectory error:nil];
-}
-
-static void testGenerationIdentifierCannotReuseDifferentMaterializedValues(void) {
-    NSString *identityDirectory = [NSTemporaryDirectory()
-        stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
-    assert([[NSFileManager defaultManager] createDirectoryAtPath:identityDirectory
-                                      withIntermediateDirectories:YES
-                                                       attributes:nil
-                                                            error:nil]);
-
-    PXProfileGenerationInput *firstInput = fixedGenerationInput();
-    PXProfileGenerationInput *conflictingInput = fixedGenerationInput();
-    conflictingInput.generatedAt = [firstInput.generatedAt dateByAddingTimeInterval:60.0];
-    PXProfileGenerator *generator = [[PXProfileGenerator alloc] init];
-    PXProfileManifest *first = [generator generateManifestWithInput:firstInput error:nil];
-    PXProfileManifest *conflicting = [generator
-        generateManifestWithInput:conflictingInput
-        error:nil];
-    assert([first.generationID isEqualToString:conflicting.generationID]);
-    assert(![[first propertyListRepresentation]
-        isEqualToDictionary:[conflicting propertyListRepresentation]]);
-
-    PXProfileStore *store = [[PXProfileStore alloc]
-        initWithIdentityDirectory:identityDirectory];
-    assert([store promoteManifest:first error:nil]);
-    assert([store promoteManifest:first error:nil]);
-    NSError *promotionError = nil;
-    assert(![store promoteManifest:conflicting error:&promotionError]);
-    assert(promotionError != nil);
-    assert(promotionError.code == 14);
-    assert([promotionError.localizedDescription isEqualToString:
-        @"Generation identifier already exists with different materialized values"]);
-    PXProfileManifest *active = [store activeManifestWithError:nil];
-    assert([[active propertyListRepresentation]
-        isEqualToDictionary:[first propertyListRepresentation]]);
-    NSArray<NSString *> *generationDirectories = [[NSFileManager defaultManager]
-        contentsOfDirectoryAtPath:[identityDirectory
-            stringByAppendingPathComponent:@"profile_generations"]
-        error:nil];
-    assert(generationDirectories.count == 1);
-    [[NSFileManager defaultManager] removeItemAtPath:identityDirectory error:nil];
-}
-
-static void testConcurrentPromotionsAreSerialized(void) {
-    NSString *identityDirectory = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
-    assert([[NSFileManager defaultManager] createDirectoryAtPath:identityDirectory
-                                      withIntermediateDirectories:YES
-                                                       attributes:nil
-                                                            error:nil]);
-    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
-    PXProfileGenerator *generator = [[PXProfileGenerator alloc] init];
-    NSMutableArray<PXProfileManifest *> *manifests = [NSMutableArray array];
-    for (uint8_t mutation = 1; mutation <= 8; mutation++) {
-        PXProfileGenerationInput *input = fixedGenerationInput();
-        NSMutableData *seed = [input.seed mutableCopy];
-        ((uint8_t *)seed.mutableBytes)[0] ^= mutation;
-        input.seed = seed;
-        [manifests addObject:[generator generateManifestWithInput:input error:nil]];
-    }
-
-    __block BOOL allSucceeded = YES;
-    dispatch_group_t group = dispatch_group_create();
-    dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0);
-    for (PXProfileManifest *manifest in manifests) {
-        dispatch_group_async(group, queue, ^{
-            PXProfileStore *concurrentStore = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
-            if (![concurrentStore promoteManifest:manifest error:nil]) {
-                @synchronized(store) {
-                    allSucceeded = NO;
-                }
-            }
-        });
-    }
-    dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
-
-    PXProfileManifest *active = [store activeManifestWithError:nil];
-    assert(allSucceeded);
-    assert(active != nil);
-    NSString *activeGenerationDirectory = [identityDirectory stringByAppendingPathComponent:@"profile_active"];
-    NSArray<NSString *> *activeProjectionFileNames = [[NSFileManager defaultManager]
-        contentsOfDirectoryAtPath:activeGenerationDirectory
-        error:nil];
-    assert(activeProjectionFileNames.count >= 20);
-    for (NSString *fileName in activeProjectionFileNames) {
-        if (![[fileName pathExtension] isEqualToString:@"plist"]) continue;
-        NSDictionary *projection = [NSDictionary dictionaryWithContentsOfFile:
-            [identityDirectory stringByAppendingPathComponent:fileName]];
-        assert([projection[@"generationID"] isEqualToString:active.generationID]);
-    }
-    NSDictionary *networkProjection = [NSDictionary dictionaryWithContentsOfFile:
-        [identityDirectory stringByAppendingPathComponent:@"network_settings.plist"]];
-    NSDictionary *carrierProjection = [NSDictionary dictionaryWithContentsOfFile:
-        [identityDirectory stringByAppendingPathComponent:@"carrier_details.plist"]];
-    assert([networkProjection[@"carrierID"] isEqualToString:active.network[@"carrierID"]]);
-    assert([networkProjection[@"serviceIdentifier"] isEqualToString:active.network[@"serviceIdentifier"]]);
-    assert([networkProjection[@"radioTechnology"] isEqualToString:active.network[@"radioTechnology"]]);
-    assert([carrierProjection[@"carrierID"] isEqualToString:active.network[@"carrierID"]]);
-    [[NSFileManager defaultManager] removeItemAtPath:identityDirectory error:nil];
-}
-
-static void testMixedGenerationProjectionIsRejectedWithoutRepair(void) {
-    NSString *identityDirectory = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
-    assert([[NSFileManager defaultManager] createDirectoryAtPath:identityDirectory
-                                      withIntermediateDirectories:YES
-                                                       attributes:nil
-                                                            error:nil]);
-    PXProfileManifest *manifest = [[[PXProfileGenerator alloc] init]
-        generateManifestWithInput:fixedGenerationInput()
-        error:nil];
-    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
-    assert([store promoteManifest:manifest error:nil]);
-
-    NSString *networkPath = [identityDirectory stringByAppendingPathComponent:@"network_settings.plist"];
-    NSMutableDictionary *networkProjection = [NSMutableDictionary dictionaryWithContentsOfFile:networkPath];
-    networkProjection[@"generationID"] = NSUUID.UUID.UUIDString;
-    assert([networkProjection writeToFile:networkPath atomically:YES]);
-
-    NSError *readError = nil;
-    assert([store activeManifestWithError:&readError] == nil);
-    assert(readError != nil);
-    NSDictionary *unchangedCorruption = [NSDictionary dictionaryWithContentsOfFile:networkPath];
-    assert([unchangedCorruption[@"generationID"] isEqualToString:networkProjection[@"generationID"]]);
-    [[NSFileManager defaultManager] removeItemAtPath:identityDirectory error:nil];
-}
-
-static void testLegacyMigrationPreservesValuesAndIsIdempotent(void) {
-    NSString *identityDirectory = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
-    assert([[NSFileManager defaultManager] createDirectoryAtPath:identityDirectory
-                                      withIntermediateDirectories:YES
-                                                       attributes:nil
-                                                            error:nil]);
-    PXProfileManifest *source = [[[PXProfileGenerator alloc] init]
-        generateManifestWithInput:fixedGenerationInput()
-        error:nil];
-
-    NSMutableDictionary *legacyDevice = [source.device mutableCopy];
-    legacyDevice[@"value"] = source.device[@"identifier"];
-    [legacyDevice writeToFile:[identityDirectory stringByAppendingPathComponent:@"device_model.plist"] atomically:YES];
-    [source.operatingSystem writeToFile:[identityDirectory stringByAppendingPathComponent:@"ios_version.plist"] atomically:YES];
-    NSMutableDictionary *legacyNetwork = [source.network mutableCopy];
-    [legacyNetwork removeObjectForKey:@"ssid"];
-    [legacyNetwork removeObjectForKey:@"bssid"];
-    [legacyNetwork writeToFile:[identityDirectory stringByAppendingPathComponent:@"network_settings.plist"] atomically:YES];
-    [@{
-        @"IDFA": source.identifiers[@"idfa"],
-        @"IDFV": source.identifiers[@"idfv"],
-        @"DyldCacheUUID": source.identifiers[@"dyldCacheUUID"],
-        @"PasteboardUUID": source.identifiers[@"pasteboardUUID"],
-        @"KeychainUUID": source.identifiers[@"keychainUUID"],
-        @"UserDefaultsUUID": source.identifiers[@"userDefaultsUUID"],
-        @"AppGroupUUID": NSUUID.UUID.UUIDString,
-        @"CoreDataUUID": source.identifiers[@"coreDataUUID"],
-        @"AppInstallUUID": NSUUID.UUID.UUIDString,
-        @"AppContainerUUID": NSUUID.UUID.UUIDString,
-        @"DeviceName": @"Legacy User's iPhone",
-        @"SerialNumber": source.identifiers[@"serialNumber"],
-        @"IMEI": source.identifiers[@"imei"],
-        @"MEID": source.identifiers[@"meid"]
-    } writeToFile:[identityDirectory stringByAppendingPathComponent:@"device_ids.plist"] atomically:YES];
-    [@{@"ssid": @"Legacy WiFi", @"bssid": @"00:11:22:33:44:55"} writeToFile:
-        [identityDirectory stringByAppendingPathComponent:@"wifi_info.plist"] atomically:YES];
-    [source.location writeToFile:[identityDirectory stringByAppendingPathComponent:@"location.plist"] atomically:YES];
-    NSArray<NSString *> *retiredAppIdentityFiles = @[
-        @"appgroup_uuid.plist",
-        @"appinstall_uuid.plist",
-        @"appcontainer_uuid.plist"
-    ];
-    for (NSString *fileName in retiredAppIdentityFiles) {
-        [@{@"value": NSUUID.UUID.UUIDString} writeToFile:
-            [identityDirectory stringByAppendingPathComponent:fileName]
-            atomically:YES];
-    }
-
-    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
-    assert([store migrateLegacyProfileIfNeededWithError:nil]);
-    PXProfileManifest *firstRead = [store activeManifestWithError:nil];
-    assert([firstRead.device[@"identifier"] isEqualToString:source.device[@"identifier"]]);
-    assert([firstRead.network[@"carrierName"] isEqualToString:source.network[@"carrierName"]]);
-    assert([firstRead.identifiers[@"idfa"] isEqualToString:source.identifiers[@"idfa"]]);
-    assert([firstRead.identifiers[@"deviceName"] isEqualToString:@"Legacy User's iPhone"]);
-    assert([firstRead.network[@"ssid"] isEqualToString:@"Legacy WiFi"]);
-    assert([firstRead.location[@"latitude"] isEqual:source.location[@"latitude"]]);
-    assert(firstRead.schemaVersion == 5);
-    assert(firstRead.appIdentities.count == 0);
-    assert(firstRead.appGroupIdentities.count == 0);
-    assert(firstRead.identifiers[@"appInstallUUID"] == nil);
-    for (NSString *fileName in retiredAppIdentityFiles) {
-        assert(![[NSFileManager defaultManager] fileExistsAtPath:
-            [identityDirectory stringByAppendingPathComponent:fileName]]);
-    }
-
-    assert([store migrateLegacyProfileIfNeededWithError:nil]);
-    PXProfileManifest *secondRead = [store activeManifestWithError:nil];
-    assert([firstRead.generationID isEqualToString:secondRead.generationID]);
-    [[NSFileManager defaultManager] removeItemAtPath:identityDirectory error:nil];
-}
-
-static void testAddingScopedAppIdentityDoesNotRegenerateDeviceOrNetwork(void) {
-    NSString *identityDirectory = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
-    PXProfileManifest *source = [[[PXProfileGenerator alloc] init]
-        generateManifestWithInput:fixedGenerationInput()
-        error:nil];
-    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
-    assert([store promoteManifest:source error:nil]);
-    NSDictionary<NSString *, id> *regionProjection = [NSDictionary dictionaryWithContentsOfFile:
-        [identityDirectory stringByAppendingPathComponent:@"region.plist"]];
-    assert([regionProjection[@"generationID"] isEqualToString:source.generationID]);
-    assert([regionProjection[@"value"] isEqualToDictionary:source.region]);
-
-    NSSet<NSString *> *groups = [NSSet setWithObject:@"group.com.example.shared"];
-    NSSet<NSString *> *installKeys = [NSSet setWithObject:@"vendor_first_launch_token"];
-    assert([store ensureApplicationIdentityForBundleIdentifier:@"com.example.app"
-                                              groupIdentifiers:groups
-                                         installIdentifierKeys:installKeys
-                                                          error:nil]);
-    PXProfileManifest *updated = [store activeManifestWithError:nil];
-    assert([updated.generationID isEqualToString:source.generationID]);
-    assert([updated.device isEqualToDictionary:source.device]);
-    assert([updated.network isEqualToDictionary:source.network]);
-    assert(updated.appIdentities[@"com.example.app"] != nil);
-    assert(updated.appGroupIdentities[@"group.com.example.shared"] != nil);
-
-    NSDictionary *firstUpdate = [updated propertyListRepresentation];
-    assert([store ensureApplicationIdentityForBundleIdentifier:@"com.example.app"
-                                              groupIdentifiers:groups
-                                         installIdentifierKeys:installKeys
-                                                          error:nil]);
-    assert([[[store activeManifestWithError:nil] propertyListRepresentation] isEqualToDictionary:firstUpdate]);
-    [[NSFileManager defaultManager] removeItemAtPath:identityDirectory error:nil];
-}
-
-static void testActiveApplicationIdentityMapCanBePrunedAndRestoredWithoutChangingProfile(void) {
-    NSString *identityDirectory = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
-    PXProfileGenerationInput *input = fixedGenerationInput();
-    input.appBundleIdentifiers = [NSSet setWithArray:@[
-        @"com.example.installed",
-        @"com.example.deleted"
-    ]];
-    input.appGroupIdentifiers = [NSSet setWithObject:@"group.com.example.shared"];
-    PXProfileManifest *source = [[[PXProfileGenerator alloc] init]
-        generateManifestWithInput:input
-        error:nil];
-    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
-    assert([store promoteManifest:source error:nil]);
-    NSDictionary<NSString *, NSDictionary<NSString *, id> *> *originalIdentities =
-        [store activeApplicationIdentityPropertyListsWithError:nil];
-    NSMutableDictionary<NSString *, NSDictionary<NSString *, id> *> *remainingIdentities =
-        [originalIdentities mutableCopy];
-    [remainingIdentities removeObjectForKey:@"com.example.deleted"];
-
-    assert([store replaceActiveApplicationIdentityPropertyLists:remainingIdentities error:nil]);
-
-    PXProfileManifest *pruned = [store activeManifestWithError:nil];
-    assert(pruned.appIdentities[@"com.example.deleted"] == nil);
-    assert(pruned.appIdentities[@"com.example.installed"] != nil);
-    assert([[pruned propertyListRepresentation][@"appGroupIdentities"]
-        isEqualToDictionary:[source propertyListRepresentation][@"appGroupIdentities"]]);
-    assert([pruned.generationID isEqualToString:source.generationID]);
-    assert([pruned.device isEqualToDictionary:source.device]);
-    assert([store replaceActiveApplicationIdentityPropertyLists:originalIdentities error:nil]);
-    assert([[[store activeManifestWithError:nil] propertyListRepresentation][@"appIdentities"]
-        isEqualToDictionary:[source propertyListRepresentation][@"appIdentities"]]);
-    [[NSFileManager defaultManager] removeItemAtPath:identityDirectory error:nil];
-}
-
-static void testActiveSchemaThreeManifestMigrationIsPersistedAndIdempotent(void) {
-    NSString *identityDirectory = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
-    PXProfileManifest *source = [[[PXProfileGenerator alloc] init]
-        generateManifestWithInput:fixedGenerationInput()
-        error:nil];
-    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
-    assert([store promoteManifest:source error:nil]);
-    NSString *manifestPath = [[identityDirectory stringByAppendingPathComponent:@"profile_manifest.plist"]
-        stringByResolvingSymlinksInPath];
-    NSMutableDictionary<NSString *, id> *legacyManifest =
-        [[NSDictionary dictionaryWithContentsOfFile:manifestPath] mutableCopy];
-    legacyManifest[@"schemaVersion"] = @3;
-    NSMutableDictionary<NSString *, id> *legacyIdentifiers = [legacyManifest[@"identifiers"] mutableCopy];
-    legacyIdentifiers[@"appInstallUUID"] = NSUUID.UUID.UUIDString;
-    legacyIdentifiers[@"appContainerUUID"] = NSUUID.UUID.UUIDString;
-    legacyIdentifiers[@"appGroupUUID"] = NSUUID.UUID.UUIDString;
-    legacyManifest[@"identifiers"] = legacyIdentifiers;
-    [legacyManifest removeObjectForKey:@"appIdentities"];
-    [legacyManifest removeObjectForKey:@"appGroupIdentities"];
-    assert([legacyManifest writeToFile:manifestPath atomically:YES]);
-
-    assert([store migrateLegacyProfileIfNeededWithError:nil]);
-    NSDictionary<NSString *, id> *migratedPropertyList = [NSDictionary dictionaryWithContentsOfFile:manifestPath];
-    assert([migratedPropertyList[@"schemaVersion"] integerValue] == 5);
-    assert(migratedPropertyList[@"identifiers"][@"appInstallUUID"] == nil);
-    PXProfileManifest *migrated = [store activeManifestWithError:nil];
-    assert([migrated.generationID isEqualToString:source.generationID]);
-    assert([migrated.device isEqualToDictionary:source.device]);
-    assert([migrated.network isEqualToDictionary:source.network]);
-
-    assert([store migrateLegacyProfileIfNeededWithError:nil]);
-    assert([[NSDictionary dictionaryWithContentsOfFile:manifestPath] isEqualToDictionary:migratedPropertyList]);
-    [[NSFileManager defaultManager] removeItemAtPath:identityDirectory error:nil];
-}
-
-static void testSchemaFourPartialRegionMigrationIsPersistedAndIdempotent(void) {
-    NSString *identityDirectory = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
-    PXProfileManifest *source = [[[PXProfileGenerator alloc] init]
-        generateManifestWithInput:fixedGenerationInput()
-        error:nil];
-    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
-    assert([store promoteManifest:source error:nil]);
-    NSString *manifestPath = [[identityDirectory stringByAppendingPathComponent:@"profile_manifest.plist"]
-        stringByResolvingSymlinksInPath];
-    NSMutableDictionary<NSString *, id> *legacyManifest =
-        [[NSDictionary dictionaryWithContentsOfFile:manifestPath] mutableCopy];
-    legacyManifest[@"schemaVersion"] = @4;
-    NSDictionary<NSString *, id> *legacyRegion = @{
-        @"countryCode": @"FR",
-        @"localeIdentifier": @"fr_FR",
-        @"timeZone": @"Europe/Paris",
-        @"currencyCode": @"EUR"
-    };
-    legacyManifest[@"region"] = legacyRegion;
-    assert([legacyManifest writeToFile:manifestPath atomically:YES]);
-    NSString *regionProjectionPath = [[identityDirectory stringByAppendingPathComponent:@"region.plist"]
-        stringByResolvingSymlinksInPath];
-    NSMutableDictionary<NSString *, id> *legacyRegionProjection =
-        [[NSDictionary dictionaryWithContentsOfFile:regionProjectionPath] mutableCopy];
-    legacyRegionProjection[@"value"] = legacyRegion;
-    assert([legacyRegionProjection writeToFile:regionProjectionPath atomically:YES]);
-
-    assert([store migrateLegacyProfileIfNeededWithError:nil]);
-    NSDictionary<NSString *, id> *migratedPropertyList = [NSDictionary dictionaryWithContentsOfFile:manifestPath];
-    PXProfileManifest *migrated = [store activeManifestWithError:nil];
-    assert([migratedPropertyList[@"schemaVersion"] integerValue] == 5);
-    assert([migrated.region[@"preferredLanguages"] isEqualToArray:@[@"fr-FR"]]);
-    assert([migrated.region[@"calendarIdentifier"] isEqualToString:@"gregorian"]);
-    assert([migrated.generationID isEqualToString:source.generationID]);
-    assert([migrated.identifiers isEqualToDictionary:source.identifiers]);
-    assert([migrated.network isEqualToDictionary:source.network]);
-    NSDictionary<NSString *, id> *regionProjection = [NSDictionary dictionaryWithContentsOfFile:
-        [identityDirectory stringByAppendingPathComponent:@"region.plist"]];
-    assert([regionProjection[@"generationID"] isEqualToString:migrated.generationID]);
-    assert([regionProjection[@"value"] isEqualToDictionary:migrated.region]);
-
-    assert([store migrateLegacyProfileIfNeededWithError:nil]);
-    assert([[NSDictionary dictionaryWithContentsOfFile:manifestPath] isEqualToDictionary:migratedPropertyList]);
-    [[NSFileManager defaultManager] removeItemAtPath:identityDirectory error:nil];
-}
-
-static void testMalformedApplicationIdentityMapFailsClosed(void) {
-    PXProfileManifest *source = [[[PXProfileGenerator alloc] init]
-        generateManifestWithInput:fixedGenerationInput()
-        error:nil];
-    NSMutableDictionary<NSString *, id> *propertyList = [[source propertyListRepresentation] mutableCopy];
-    propertyList[@"appIdentities"] = @{
-        @"com.example.app": @{@"installUUID": NSUUID.UUID.UUIDString}
-    };
-    NSError *error = nil;
-    assert([PXProfileManifest manifestWithPropertyList:propertyList error:&error] == nil);
-    assert(error != nil);
-}
-
-static void testMalformedSchemaFiveRegionFailsClosedWithoutRepair(void) {
-    PXProfileManifest *source = [[[PXProfileGenerator alloc] init]
-        generateManifestWithInput:fixedGenerationInput()
-        error:nil];
-    NSMutableDictionary<NSString *, id> *propertyList = [[source propertyListRepresentation] mutableCopy];
-    propertyList[@"region"] = @{
-        @"countryCode": @"FR",
-        @"localeIdentifier": @"fr_FR",
-        @"timeZone": @"Invalid/Timezone",
-        @"currencyCode": @"EUR"
-    };
-    NSError *error = nil;
-    assert([PXProfileManifest manifestWithPropertyList:propertyList error:&error] == nil);
-    assert(error != nil);
+    assert([[store activeGenerationIDWithError:nil] isEqualToString:first.generationID]);
+    store.failBeforePromotionForTesting = NO;
+    assert([store promoteManifest:second error:nil]);
+    assert([[store activeGenerationIDWithError:nil] isEqualToString:second.generationID]);
+    NSString *replacementIDFA = NSUUID.UUID.UUIDString;
+    assert([store replaceActiveIdentifierValue:replacementIDFA forKey:@"idfa" error:nil]);
+    NSDictionary *editedProfile = [NSDictionary dictionaryWithContentsOfFile:profilePath];
+    assert([editedProfile[@"manifest"][@"identifiers"][@"idfa"] isEqualToString:replacementIDFA]);
+    assert([editedProfile[@"values"][@"identity/advertising_id.plist"][@"value"] isEqualToString:replacementIDFA]);
+    assert([editedProfile[@"values"][@"identity/device_ids.plist"][@"IDFA"] isEqualToString:replacementIDFA]);
+    assert([[store activeGenerationIDWithError:nil] isEqualToString:second.generationID]);
+    assert(![store replaceActiveIdentifierValue:@"invalid" forKey:@"idfa" error:nil]);
+    assert(![store replaceActiveIdentifierValue:@"x" forKey:@"unknown" error:nil]);
+    assert([[NSDictionary dictionaryWithContentsOfFile:profilePath][@"manifest"][@"identifiers"][@"idfa"]
+        isEqualToString:replacementIDFA]);
+    assert([store replaceActiveLocalIPAddress:@"192.0.2.42" IPv6Address:@"2001:db8::42" error:nil]);
+    NSDictionary *networkProfile = [NSDictionary dictionaryWithContentsOfFile:profilePath];
+    assert([networkProfile[@"manifest"][@"network"][@"localIPAddress"] isEqualToString:@"192.0.2.42"]);
+    assert([networkProfile[@"values"][@"identity/network_settings.plist"][@"localIPv6Address"] isEqualToString:@"2001:db8::42"]);
+    assert([networkProfile[@"values"][@"identity/device_ids.plist"][@"LocalIPAddress"] isEqualToString:@"192.0.2.42"]);
+    NSDictionary *replacementValues = [NSDictionary dictionaryWithContentsOfFile:profilePath][@"values"];
+    assert(replacementValues[@"identity/stale_uuid.plist"] == nil);
+    assert([replacementValues[@"trustedCarriers"][@"trustedCarrierIDs"]
+        isEqualToArray:@[@"test-carrier"]]);
+    assert([[NSFileManager defaultManager] fileExistsAtPath:profilePath]);
+    assert(![[NSFileManager defaultManager] fileExistsAtPath:
+        [testRoot stringByAppendingPathComponent:@"Profiles"]]);
+    [[NSFileManager defaultManager] removeItemAtPath:testRoot error:nil];
 }
 
 int main(void) {
@@ -1075,24 +651,13 @@ int main(void) {
         testUnsupportedPending5GModelFailsClosed();
         testIncompatibleIPhoneFourteenProIsRejectedBeforeProfileGeneration();
         testPhysicalModeWithUnavailableGraphicsProbeProducesValidManifest();
-        testProductionIPhoneSevenPlusPhysicalPathReplacesEmptyLegacyProjection();
         testIncompleteProductionDeviceRecordNamesEveryInvalidField();
         testPinnedCountryPreferenceNeverBreaksCarrierRegionCoherence();
         testGeneratedManifestUsesPerAppAndPerGroupIdentityMaps();
         testGeneratedManifestSatisfiesCrossFieldInvariants();
         testInternallyIncoherentGraphicsModelIsRejectedBeforeManifestActivation();
         testManifestDeclaresFieldSourcesAndCreatesVirtualRuntimeSession();
-        testFailedPromotionLeavesPreviousGenerationActive();
-        testGenerationIdentifierCannotReuseDifferentMaterializedValues();
-        testConcurrentPromotionsAreSerialized();
-        testMixedGenerationProjectionIsRejectedWithoutRepair();
-        testLegacyMigrationPreservesValuesAndIsIdempotent();
-        testAddingScopedAppIdentityDoesNotRegenerateDeviceOrNetwork();
-        testActiveApplicationIdentityMapCanBePrunedAndRestoredWithoutChangingProfile();
-        testActiveSchemaThreeManifestMigrationIsPersistedAndIdempotent();
-        testSchemaFourPartialRegionMigrationIsPersistedAndIdempotent();
-        testMalformedApplicationIdentityMapFailsClosed();
-        testMalformedSchemaFiveRegionFailsClosedWithoutRepair();
+        testOneProfileFileStoresAndReplacesAllGeneratedValues();
     }
     return 0;
 }

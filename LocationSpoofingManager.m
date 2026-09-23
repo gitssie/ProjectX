@@ -228,14 +228,14 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         NSString *plistPath = [self spoofingPlistPath];
         
         // Load existing settings
-        NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
+        NSMutableDictionary *settings = [PXProfileReadDictionary(plistPath) mutableCopy];
         if (settings) {
             // Remove PinnedLocation but keep toggle state
             [settings removeObjectForKey:@"PinnedLocation"];
             [settings removeObjectForKey:@"ActiveRouteSegment"];
             
             // Write to file
-            BOOL success = [settings writeToFile:plistPath atomically:YES];
+            BOOL success = PXProfileWriteDictionary(settings, plistPath);
             if (!success) {
                 PXLog(@"[WeaponX] Failed to remove pinned location");
             }
@@ -278,7 +278,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         NSString *plistPath = [self spoofingPlistPath];
         
         // Load existing settings or create new dictionary
-        NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
+        NSMutableDictionary *settings = [PXProfileReadDictionary(plistPath) mutableCopy];
         if (!settings) {
             settings = [NSMutableDictionary dictionary];
         }
@@ -288,7 +288,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         [settings removeObjectForKey:@"ActiveRouteSegment"];
         
         // Write to file
-        BOOL success = [settings writeToFile:plistPath atomically:YES];
+        BOOL success = PXProfileWriteDictionary(settings, plistPath);
         if (!success) {
             PXLog(@"[WeaponX] Failed to save pinned location");
         } else {
@@ -306,7 +306,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         NSString *plistPath = [self spoofingPlistPath];
         
         // Load settings
-        NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+        NSDictionary *settings = PXProfileReadDictionary(plistPath);
         if (!settings) {
             return @{}; // Empty dictionary if no settings file
         }
@@ -354,7 +354,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         PXLog(@"[WeaponX] LocationSpoofingManager: File exists: %@", [fileManager fileExistsAtPath:scopedAppsFile] ? @"YES" : @"NO");
         
         // Load scoped apps from the global scope file
-        NSDictionary *scopedAppsDict = [NSDictionary dictionaryWithContentsOfFile:scopedAppsFile];
+        NSDictionary *scopedAppsDict = PXProfileReadDictionary(scopedAppsFile);
         PXLog(@"[WeaponX] LocationSpoofingManager: Loaded dictionary: %@", scopedAppsDict ? @"YES" : @"NO");
         
         NSDictionary *savedApps = scopedAppsDict[@"ScopedApps"];
@@ -571,14 +571,11 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
     if (self.cachedLocationManifest) {
         return self.cachedLocationManifest;
     }
-    NSDictionary *profileInfo = [NSDictionary dictionaryWithContentsOfFile:PXCurrentProfileInfoPath()];
-    NSString *profileID = [profileInfo[@"ProfileId"] isKindOfClass:[NSString class]]
-        ? profileInfo[@"ProfileId"]
-        : nil;
-    if (profileID.length == 0 || ![profileID isEqualToString:profileID.lastPathComponent]) {
+    NSDictionary *profileInfo = PXProfileReadDictionary(PXCurrentProfileInfoPath());
+    if (!profileInfo) {
         return nil;
     }
-    NSString *identityDirectory = PXProfileIdentityDirectoryPath(profileID);
+    NSString *identityDirectory = PXCurrentProfileIdentityValuesPath();
     PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
     PXProfileManifest *manifest = [store activeManifestWithError:nil];
     self.cachedLocationManifest = manifest;
@@ -601,7 +598,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
             ? [self directReadPinnedLocationFromFile]
             : nil;
         self.spoofingEnabled = pinnedLocation != nil;
-        NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:[self spoofingPlistPath]];
+        NSDictionary *settings = PXProfileReadDictionary([self spoofingPlistPath]);
         NSDictionary *routeSegment = [settings[@"ActiveRouteSegment"] isKindOfClass:[NSDictionary class]]
             ? settings[@"ActiveRouteSegment"]
             : nil;
@@ -657,8 +654,8 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
     if (!currentPosition || !segmentStart || !segmentEnd) {
         return;
     }
-    NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:
-        [self spoofingPlistPath]] ?: [NSMutableDictionary dictionary];
+    NSMutableDictionary *settings = [PXProfileReadDictionary(
+        [self spoofingPlistPath]) mutableCopy] ?: [NSMutableDictionary dictionary];
     CLLocationCoordinate2D position = currentPosition.coordinate;
     CLLocationCoordinate2D start = segmentStart.coordinate;
     CLLocationCoordinate2D end = segmentEnd.coordinate;
@@ -684,8 +681,8 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
 }
 
 - (void)clearPublishedPathContext {
-    NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:
-        [self spoofingPlistPath]];
+    NSMutableDictionary *settings = [PXProfileReadDictionary(
+        [self spoofingPlistPath]) mutableCopy];
     if (!settings[@"ActiveRouteSegment"]) {
         return;
     }
@@ -927,7 +924,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         }
         
         // Read the plist file directly
-        NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+        NSDictionary *settings = PXProfileReadDictionary(plistPath);
         if (!settings) {
             self.cachedPinnedLocation = nil;
             self.lastPinnedLocationReadTime = currentTime;
@@ -974,7 +971,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         NSString *plistPath = [self spoofingPlistPath];
         
         // Load existing settings or create new dictionary
-        NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
+        NSMutableDictionary *settings = [PXProfileReadDictionary(plistPath) mutableCopy];
         if (!settings) {
             settings = [NSMutableDictionary dictionary];
         }
@@ -983,7 +980,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         settings[@"GPSSpoofingToggleEnabled"] = @(enabled);
         
         // Write to file
-        BOOL success = [settings writeToFile:plistPath atomically:YES];
+        BOOL success = PXProfileWriteDictionary(settings, plistPath);
         if (!success) {
             PXLog(@"[WeaponX] Failed to save GPS spoofing toggle state");
         } else {
@@ -999,7 +996,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         NSString *plistPath = [self spoofingPlistPath];
         
         // Load settings
-        NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+        NSDictionary *settings = PXProfileReadDictionary(plistPath);
         if (!settings) {
             return NO; // Default to disabled if no settings file
         }

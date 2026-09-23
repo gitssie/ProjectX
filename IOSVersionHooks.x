@@ -129,7 +129,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Load the plist file safely
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
+        NSDictionary *plistDict = PXProfileReadDictionary(validPath);
         if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
             scopedAppsCacheTimestamp = [NSDate date];
             return scopedAppsCache;
@@ -253,65 +253,21 @@ static NSDictionary *getIOSVersionInfo() {
         return versionCache;
     }
     
-    // Read version value directly from profile files
-    NSString *formattedVersion = nil;
-    
-    NSArray *possibleProfilePaths = @[PXProfilesDirectoryPath()];
-    
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    for (NSString *profileBasePath in possibleProfilePaths) {
-        if ([fileManager fileExistsAtPath:profileBasePath]) {
-            // Get current profile ID
-            NSString *currentProfileInfoPath = [profileBasePath stringByAppendingPathComponent:@"current_profile_info.plist"];
-            NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:currentProfileInfoPath];
-            NSString *profileId = currentProfileInfo[@"ProfileId"];
-            
-            if (profileId) {
-                // Try to read iOS version from device_ids.plist
-                NSString *identityDir = [[profileBasePath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
-                NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-                NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-                formattedVersion = deviceIds[@"IOSVersion"];
-                
-                if (formattedVersion) {
-                    break;
-                }
-                
-                // Try to read from ios_version.plist
-                NSString *iosVersionPath = [identityDir stringByAppendingPathComponent:@"ios_version.plist"];
-                NSDictionary *iosVersion = [NSDictionary dictionaryWithContentsOfFile:iosVersionPath];
-                formattedVersion = iosVersion[@"value"];
-                
-                if (formattedVersion) {
-                    break;
-                }
-            }
-        }
-    }
-    
-    if (!formattedVersion) {
-        // Fallback: try to use IOSVersionInfo to generate a random version
-        @try {
-            IOSVersionInfo *versionManager = [NSClassFromString(@"IOSVersionInfo") sharedManager];
-            if (versionManager) {
-                NSDictionary *randomVersionInfo = [versionManager generateIOSVersionInfo];
-                if (randomVersionInfo) {
-                    IOSVERSION_LOG(@"Using fallback random iOS version from IOSVersionInfo");
-                    
-                    // Cache the result
-                    versionCache = [randomVersionInfo copy];
-                    lastVersionLoad = now;
-                    
-                    return versionCache;
-                }
-            }
-        } @catch (NSException *e) {
-            IOSVERSION_LOG(@"❌ Error using IOSVersionInfo fallback: %@", e);
-        }
-        
+    // Read a single Profile snapshot so version and build belong to one generation.
+    NSDictionary *profile = PXProfileReadContentsAtPath(PXCurrentProfileInfoPath());
+    NSDictionary *manifest = [profile[@"manifest"] isKindOfClass:[NSDictionary class]]
+        ? profile[@"manifest"] : nil;
+    NSDictionary *operatingSystem = [manifest[@"operatingSystem"] isKindOfClass:[NSDictionary class]]
+        ? manifest[@"operatingSystem"] : nil;
+    NSString *version = [operatingSystem[@"version"] isKindOfClass:[NSString class]]
+        ? operatingSystem[@"version"] : nil;
+    NSString *build = [operatingSystem[@"build"] isKindOfClass:[NSString class]]
+        ? operatingSystem[@"build"] : nil;
+    if (version.length == 0 || build.length == 0) {
         return nil;
     }
-    
+    NSString *formattedVersion = [NSString stringWithFormat:@"%@ (%@)", version, build];
+
     // Parse the formatted version string to extract version and build
     // Format is typically "15.5 (19F77)"
     NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"([0-9.]+)\\s*\\(([^)]+)\\)" options:0 error:nil];

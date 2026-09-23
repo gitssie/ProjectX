@@ -34,15 +34,7 @@
 
 + (instancetype)sharedManager;
 
-// Device Model Generation
-- (NSString *)generateDeviceModel;
-- (NSString *)currentDeviceModel;
-- (void)setCurrentDeviceModel:(NSString *)deviceModel;
-
 // Validation
 - (BOOL)isValidDeviceModel:(NSString *)deviceModel;
-
-// Error Handling
-- (NSError *)lastError;
 
 @end

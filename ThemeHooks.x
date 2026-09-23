@@ -88,7 +88,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Load the plist file safely
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
+        NSDictionary *plistDict = PXProfileReadDictionary(validPath);
         if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
             scopedAppsCacheTimestamp = [NSDate date];
             return scopedAppsCache;
@@ -168,42 +168,14 @@ static WeaponXThemeStyle getThemeStyleFromProfile(void) {
         }
     }
     
-    // Read theme value directly from profile files
-    NSString *themeValue = nil;
-    
-    NSArray *possibleProfilePaths = @[PXProfilesDirectoryPath()];
-    
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    for (NSString *profileBasePath in possibleProfilePaths) {
-        if ([fileManager fileExistsAtPath:profileBasePath]) {
-            // Get current profile ID
-            NSString *currentProfileInfoPath = [profileBasePath stringByAppendingPathComponent:@"current_profile_info.plist"];
-            NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:currentProfileInfoPath];
-            NSString *profileId = currentProfileInfo[@"ProfileId"];
-            
-            if (profileId) {
-                // Try to read theme from device_ids.plist
-                NSString *identityDir = [[profileBasePath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
-                NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-                NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-                themeValue = deviceIds[@"DeviceTheme"];
-                
-                if (themeValue) {
-                    break;
-                }
-                
-                // Try to read from device_theme.plist
-                NSString *deviceThemePath = [identityDir stringByAppendingPathComponent:@"device_theme.plist"];
-                NSDictionary *deviceTheme = [NSDictionary dictionaryWithContentsOfFile:deviceThemePath];
-                themeValue = deviceTheme[@"value"];
-                
-                if (themeValue) {
-                    break;
-                }
-            }
-        }
-    }
-    
+    NSDictionary *profile = PXProfileReadContentsAtPath(PXCurrentProfileInfoPath());
+    NSDictionary *values = [profile[@"values"] isKindOfClass:[NSDictionary class]]
+        ? profile[@"values"] : nil;
+    NSDictionary *deviceTheme = [values[@"deviceTheme"] isKindOfClass:[NSDictionary class]]
+        ? values[@"deviceTheme"] : nil;
+    NSString *themeValue = [deviceTheme[@"value"] isKindOfClass:[NSString class]]
+        ? deviceTheme[@"value"] : nil;
+
     // Fallback to default if nothing found
     if (!themeValue) {
         themeValue = @"Light"; // Default to light theme

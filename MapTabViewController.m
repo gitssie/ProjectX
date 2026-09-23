@@ -3311,7 +3311,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
 // Save a location to favorites
 - (void)saveFavoriteLocation:(NSString *)name withCoordinates:(NSDictionary *)coordinates {
     NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
-    NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
+    NSMutableDictionary *settings = [PXProfileReadDictionary(plistPath) mutableCopy];
     
     if (!settings) {
         settings = [NSMutableDictionary dictionary];
@@ -3336,7 +3336,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
     
     // Save back to settings
     [settings setObject:favorites forKey:@"FavoriteLocations"];
-    [settings writeToFile:plistPath atomically:YES];
+    PXProfileWriteDictionary(settings, plistPath);
     
     // Show confirmation
     [self showToastWithMessage:[NSString stringWithFormat:@"Saved location: %@", name]];
@@ -3418,7 +3418,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
 - (void)favoritesButtonTapped {
     // Load favorites from settings
     NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
-    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+    NSDictionary *settings = PXProfileReadDictionary(plistPath);
     NSArray *favorites = settings[@"FavoriteLocations"];
     NSArray *recentLocations = settings[@"RecentLocations"];
     
@@ -3526,7 +3526,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
 - (void)showManageFavoritesView {
     // Load favorites from settings
     NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
-    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+    NSDictionary *settings = PXProfileReadDictionary(plistPath);
     NSArray *favorites = settings[@"FavoriteLocations"];
     
     if (!favorites || favorites.count == 0) {
@@ -3576,7 +3576,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
 // Delete all saved locations
 - (void)deleteAllLocations {
     NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
-    NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
+    NSMutableDictionary *settings = [PXProfileReadDictionary(plistPath) mutableCopy];
     
     if (!settings) {
         settings = [NSMutableDictionary dictionary];
@@ -3584,7 +3584,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
     
     // Remove or replace with empty array
     [settings setObject:@[] forKey:@"FavoriteLocations"];
-    [settings writeToFile:plistPath atomically:YES];
+    PXProfileWriteDictionary(settings, plistPath);
     
     // Show confirmation
     [self showToastWithMessage:@"All locations deleted"];
@@ -3800,7 +3800,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
     NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     
     // Load existing settings
-    NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
+    NSMutableDictionary *settings = [PXProfileReadDictionary(plistPath) mutableCopy];
     if (!settings) {
         settings = [NSMutableDictionary dictionary];
     }
@@ -3845,7 +3845,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
     }
     
     // Write to file
-    [settings writeToFile:plistPath atomically:YES];
+    PXProfileWriteDictionary(settings, plistPath);
     
     PXLog(@"[WeaponX] Saved pinned location at %.6f, %.6f", 
          [pinData[@"latitude"] doubleValue], 
@@ -3943,7 +3943,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
     NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     
     // Load existing settings
-    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+    NSDictionary *settings = PXProfileReadDictionary(plistPath);
     if (!settings) {
         return @[];
     }
@@ -3963,7 +3963,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
     NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     
     // Load existing settings
-    NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
+    NSMutableDictionary *settings = [PXProfileReadDictionary(plistPath) mutableCopy];
     if (!settings) {
         return; // Nothing to remove
     }
@@ -3972,7 +3972,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
     [settings removeObjectForKey:@"PinnedLocation"];
     
     // Write to file
-    [settings writeToFile:plistPath atomically:YES];
+    PXProfileWriteDictionary(settings, plistPath);
     
     PXLog(@"[WeaponX] Removed pinned location from settings");
 }
@@ -3985,7 +3985,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
     PXLog(@"[WeaponX] Checking for saved pinned location at path: %@", plistPath);
     
     // Load existing settings
-    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+    NSDictionary *settings = PXProfileReadDictionary(plistPath);
     if (!settings) {
         PXLog(@"[WeaponX] No settings file found at path");
         return; // No settings file
@@ -4311,7 +4311,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
 // Delete a favorite location
 - (void)deleteFavoriteLocation:(NSDictionary *)locationToDelete {
     NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
-    NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
+    NSMutableDictionary *settings = [PXProfileReadDictionary(plistPath) mutableCopy];
     
     if (!settings) {
         // Nothing to delete
@@ -4353,7 +4353,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
         
         // Save back to settings
         [settings setObject:favorites forKey:@"FavoriteLocations"];
-        [settings writeToFile:plistPath atomically:YES];
+        PXProfileWriteDictionary(settings, plistPath);
         
         // Show confirmation
         [self showToastWithMessage:[NSString stringWithFormat:@"Deleted: %@", nameToDelete]];
@@ -4514,7 +4514,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
     NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
     
     // Load existing settings
-    NSMutableDictionary *settings = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
+    NSMutableDictionary *settings = [PXProfileReadDictionary(plistPath) mutableCopy];
     if (!settings) {
         return;
     }
@@ -4523,7 +4523,7 @@ static NSString * const kPathMovementSpeedKey = @"com.weaponx.pathMovementSpeed"
     [settings removeObjectForKey:@"RecentLocations"];
     
     // Write to file
-    [settings writeToFile:plistPath atomically:YES];
+    PXProfileWriteDictionary(settings, plistPath);
     
     // Show toast
     [self showToastWithMessage:@"Recent locations cleared"];
@@ -6889,7 +6889,7 @@ static NSString *const kOpenCageBaseURL = @"https://api.opencagedata.com/geocode
 // Check for pinned location from plist and update circle overlay if needed
 - (void)checkPinnedLocationFromPlist {
     NSString *plistPath = PXPreferencesFilePath(@"com.weaponx.gpsspoofing.plist");
-    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+    NSDictionary *settings = PXProfileReadDictionary(plistPath);
     if (!settings) {
         // Remove circle if no settings file
         dispatch_async(dispatch_get_main_queue(), ^{

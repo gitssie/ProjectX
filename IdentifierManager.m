@@ -41,12 +41,6 @@
 @property(readonly) NSString *bundleVersion;
 @end
 
-// Forward declare what we need from Profile
-@interface Profile : NSObject
-@property (nonatomic, strong, readonly) NSString *profileId;
-@property (nonatomic, strong) NSString *name;
-@end
-
 @interface IdentifierManager ()
 @property (nonatomic, strong) NSMutableDictionary *settings;
 @property (nonatomic, strong) NSMutableDictionary *scopedApps;
@@ -110,165 +104,40 @@ static void PXIdentifierManagerScopedAppsChanged(CFNotificationCenterRef center,
 #pragma mark - Device Model
 
 - (NSString *)generateDeviceModel {
-    NSString *deviceModel = [[DeviceModelManager sharedManager] generateDeviceModel];
-    if (!deviceModel) {
-        self.error = [[DeviceModelManager sharedManager] lastError];
+    NSError *generationError = nil;
+    if (![self regenerateAllEnabledIdentifiersWithError:&generationError]) {
+        self.error = generationError;
         return nil;
     }
-    
-    // Get all device specifications from DeviceModelManager
-    DeviceModelManager *deviceManager = [DeviceModelManager sharedManager];
-    NSString *deviceModelName = [deviceManager deviceModelNameForString:deviceModel];
-    NSString *screenResolution = [deviceManager screenResolutionForModel:deviceModel];
-    NSString *viewportResolution = [deviceManager viewportResolutionForModel:deviceModel];
-    CGFloat devicePixelRatio = [deviceManager devicePixelRatioForModel:deviceModel];
-    NSInteger screenDensity = [deviceManager screenDensityForModel:deviceModel];
-    NSString *cpuArchitecture = [deviceManager cpuArchitectureForModel:deviceModel];
-    
-    // New device specifications
-    NSInteger deviceMemory = [deviceManager deviceMemoryForModel:deviceModel];
-    NSString *gpuFamily = [deviceManager gpuFamilyForModel:deviceModel];
-    NSDictionary *webGLInfo = [deviceManager webGLInfoForModel:deviceModel];
-    NSInteger cpuCoreCount = [deviceManager cpuCoreCountForModel:deviceModel];
-    NSString *metalFeatureSet = [deviceManager metalFeatureSetForModel:deviceModel];
-    
-    // Get Board ID and hw.model
-    NSString *boardID = [deviceManager boardIDForModel:deviceModel];
-    NSString *hwModel = [deviceManager hwModelForModel:deviceModel];
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        // Create a full dictionary with all device specs
-        NSDictionary *modelDict = @{
-            @"value": deviceModel ?: @"",
-            @"name": deviceModelName ?: @"",
-            @"screenResolution": screenResolution ?: @"",
-            @"viewportResolution": viewportResolution ?: @"",
-            @"devicePixelRatio": @(devicePixelRatio),
-            @"screenDensity": @(screenDensity),
-            @"cpuArchitecture": cpuArchitecture ?: @"",
-            @"deviceMemory": @(deviceMemory),
-            @"gpuFamily": gpuFamily ?: @"",
-            @"cpuCoreCount": @(cpuCoreCount),
-            @"metalFeatureSet": metalFeatureSet ?: @"Unknown",
-            @"webGLInfo": webGLInfo ?: @{},
-            @"boardID": boardID ?: @"Unknown",
-            @"hwModel": hwModel ?: @"Unknown",
-            @"lastUpdated": [NSDate date]
-        };
-        
-        NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-        [modelDict writeToFile:modelPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: [NSMutableDictionary dictionary];
-        
-        // Add all device specs to the device_ids.plist file
-        deviceIds[@"DeviceModel"] = deviceModel ?: @"";
-        deviceIds[@"DeviceModelName"] = deviceModelName ?: @"";
-        deviceIds[@"ScreenResolution"] = screenResolution ?: @"";
-        deviceIds[@"ViewportResolution"] = viewportResolution ?: @"";
-        deviceIds[@"DevicePixelRatio"] = @(devicePixelRatio);
-        deviceIds[@"ScreenDensityPPI"] = @(screenDensity);
-        deviceIds[@"CPUArchitecture"] = cpuArchitecture ?: @"";
-        deviceIds[@"DeviceMemory"] = @(deviceMemory);
-        deviceIds[@"CPUCoreCount"] = @(cpuCoreCount);
-        deviceIds[@"MetalFeatureSet"] = metalFeatureSet ?: @"Unknown";
-        deviceIds[@"GPUFamily"] = gpuFamily ?: @"";
-        // Simplified WebGL info for combined file
-        deviceIds[@"WebGLVendor"] = webGLInfo[@"webglVendor"] ?: @"Apple";
-        deviceIds[@"WebGLRenderer"] = webGLInfo[@"webglRenderer"] ?: @"Apple GPU";
-        deviceIds[@"BoardID"] = boardID ?: @"Unknown";
-        deviceIds[@"HwModel"] = hwModel ?: @"Unknown";
-        
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-    }
-    return deviceModel;
+    return [self currentValueForIdentifier:@"DeviceModel"];
 }
 
 - (BOOL)setCustomDeviceModel:(NSString *)value {
-    if (![[DeviceModelManager sharedManager] isValidDeviceModel:value]) {
-        self.error = [NSError errorWithDomain:@"com.hydra.projectx" code:2003 userInfo:@{NSLocalizedDescriptionKey: @"Invalid Device Model"}];
+    DeviceModelManager *deviceManager = [DeviceModelManager sharedManager];
+    NSDictionary<NSString *, id> *selectedRecord = nil;
+    for (NSDictionary<NSString *, id> *record in [deviceManager allDeviceSpecificationRecords]) {
+        if ([record[@"identifier"] isEqualToString:value]) {
+            selectedRecord = record;
+            break;
+        }
+    }
+    if (!selectedRecord) {
+        self.error = [NSError errorWithDomain:@"com.hydra.projectx" code:2003
+            userInfo:@{NSLocalizedDescriptionKey: @"Invalid Device Model"}];
         return NO;
     }
-    NSString *identityDir = [self profileIdentityPath];
-    BOOL success = NO;
-    
-    // Get all device specifications
-    DeviceModelManager *deviceManager = [DeviceModelManager sharedManager];
-    NSString *deviceModelName = [deviceManager deviceModelNameForString:value];
-    NSString *screenResolution = [deviceManager screenResolutionForModel:value];
-    NSString *viewportResolution = [deviceManager viewportResolutionForModel:value];
-    CGFloat devicePixelRatio = [deviceManager devicePixelRatioForModel:value];
-    NSInteger screenDensity = [deviceManager screenDensityForModel:value];
-    NSString *cpuArchitecture = [deviceManager cpuArchitectureForModel:value];
-    
-    // New device specifications
-    NSInteger deviceMemory = [deviceManager deviceMemoryForModel:value];
-    NSString *gpuFamily = [deviceManager gpuFamilyForModel:value];
-    NSDictionary *webGLInfo = [deviceManager webGLInfoForModel:value];
-    NSInteger cpuCoreCount = [deviceManager cpuCoreCountForModel:value];
-    NSString *metalFeatureSet = [deviceManager metalFeatureSetForModel:value];
-    
-    // Get Board ID and hw.model
-    NSString *boardID = [deviceManager boardIDForModel:value];
-    NSString *hwModel = [deviceManager hwModelForModel:value];
-    
-    if (identityDir) {
-        // Create a comprehensive dictionary with all device specifications
-        NSDictionary *modelDict = @{
-            @"value": value ?: @"",
-            @"name": deviceModelName ?: @"",
-            @"screenResolution": screenResolution ?: @"",
-            @"viewportResolution": viewportResolution ?: @"",
-            @"devicePixelRatio": @(devicePixelRatio),
-            @"screenDensity": @(screenDensity),
-            @"cpuArchitecture": cpuArchitecture ?: @"",
-            @"deviceMemory": @(deviceMemory),
-            @"gpuFamily": gpuFamily ?: @"",
-            @"cpuCoreCount": @(cpuCoreCount),
-            @"metalFeatureSet": metalFeatureSet ?: @"Unknown",
-            @"webGLInfo": webGLInfo ?: @{},
-            @"boardID": boardID ?: @"Unknown",
-            @"hwModel": hwModel ?: @"Unknown",
-            @"lastUpdated": [NSDate date]
-        };
-        
-        NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-        success = [modelDict writeToFile:modelPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: [NSMutableDictionary dictionary];
-        
-        // Add all device specifications to the device_ids.plist
-        deviceIds[@"DeviceModel"] = value ?: @"";
-        deviceIds[@"DeviceModelName"] = deviceModelName ?: @"";
-        deviceIds[@"ScreenResolution"] = screenResolution ?: @"";
-        deviceIds[@"ViewportResolution"] = viewportResolution ?: @"";
-        deviceIds[@"DevicePixelRatio"] = @(devicePixelRatio);
-        deviceIds[@"ScreenDensityPPI"] = @(screenDensity);
-        deviceIds[@"CPUArchitecture"] = cpuArchitecture ?: @"";
-        deviceIds[@"DeviceMemory"] = @(deviceMemory);
-        deviceIds[@"CPUCoreCount"] = @(cpuCoreCount);
-        deviceIds[@"MetalFeatureSet"] = metalFeatureSet ?: @"Unknown";
-        deviceIds[@"GPUFamily"] = gpuFamily ?: @"";
-        // Simplified WebGL info for combined file
-        deviceIds[@"WebGLVendor"] = webGLInfo[@"webglVendor"] ?: @"Apple";
-        deviceIds[@"WebGLRenderer"] = webGLInfo[@"webglRenderer"] ?: @"Apple GPU";
-        deviceIds[@"BoardID"] = boardID ?: @"Unknown";
-        deviceIds[@"HwModel"] = hwModel ?: @"Unknown";
-        
-        success = [deviceIds writeToFile:deviceIdsPath atomically:YES];
+    NSError *generationError = nil;
+    PXEnvironmentPolicyStore *policy = [PXEnvironmentPolicyStore sharedStore];
+    if (![policy saveSelectedModelRecord:selectedRecord
+                      physicalModelRecord:[deviceManager physicalDeviceSpecificationRecord]
+                  hostGraphicsCapabilities:PXCurrentGraphicsHostCapabilities()
+                                    error:&generationError] ||
+        ![self regenerateAllEnabledIdentifiersWithError:&generationError]) {
+        self.error = generationError;
+        return NO;
     }
-    if (success) {
-        [[DeviceModelManager sharedManager] setCurrentDeviceModel:value];
-    }
-    return success;
+    return YES;
 }
-
 
 + (instancetype)sharedManager {
     static IdentifierManager *sharedManager = nil;
@@ -328,221 +197,63 @@ static void PXIdentifierManagerScopedAppsChanged(CFNotificationCenterRef center,
 
 #pragma mark - Profile Integration
 
-- (NSString *)getActiveProfileId {
-    // First check the primary profile info file
-    NSString *centralInfoPath = PXCurrentProfileInfoPath();
-    NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-    
-    NSString *profileId = centralInfo[@"ProfileId"];
-    if (!profileId) {
-        // If not found, check the legacy active_profile_info.plist
-        NSString *activeInfoPath = PXActiveProfileInfoPath();
-        NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
-        profileId = activeInfo[@"ProfileId"];
-        
-        NSLog(@"[WeaponX] 🔍 CRITICAL CHECK - Primary profile info not found, checked backup: %@", profileId ? @"✅ found" : @"❌ not found");
-    }
-    
-    if (!profileId) {
-        NSLog(@"[WeaponX] Warning: No active profile ID found, using default");
-        // Try to find any profile directory as a fallback
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *profilesDir = PXProfilesDirectoryPath();
-        NSError *error = nil;
-        NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
-        
-        if (!error && contents.count > 0) {
-            // Use the first directory found as a fallback
-            for (NSString *item in contents) {
-                BOOL isDir = NO;
-                NSString *fullPath = [profilesDir stringByAppendingPathComponent:item];
-                [fileManager fileExistsAtPath:fullPath isDirectory:&isDir];
-                
-                if (isDir) {
-                    profileId = item;
-                    NSLog(@"[WeaponX] Using fallback profile ID: %@", profileId);
-                    break;
-                }
-            }
-        }
-        
-        // If we still don't have a profile ID, give up
-        if (!profileId) {
-            NSLog(@"[WeaponX] Error: Could not find any profile");
-            return nil;
-        }
-    }
-    
-    return profileId;
-}
-
 - (NSString *)profileIdentityPath {
-    // Get current profile ID without directly using ProfileManager
-    NSString *profileId = [self getActiveProfileId];
-    if (!profileId) {
-        NSLog(@"[WeaponX] Error: No active profile when getting identity path");
-        return nil;
-    }
-    
-    // Build the path to this profile's identity directory
-    NSString *profileDir = PXProfileDirectoryPath(profileId);
-    NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
-    
-    // Create the directory if it doesn't exist
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:identityDir]) {
-        NSDictionary *attributes = @{NSFilePosixPermissions: @0755,
-                                    NSFileOwnerAccountName: @"mobile"};
-        
-        NSError *dirError = nil;
-        if (![fileManager createDirectoryAtPath:identityDir 
-                    withIntermediateDirectories:YES 
-                                     attributes:attributes
-                                          error:&dirError]) {
-            NSLog(@"[WeaponX] Error creating identity directory: %@", dirError);
-            return nil;
-        }
-    }
-    
-    return identityDir;
+    return PXCurrentProfileIdentityValuesPath();
 }
 
 #pragma mark - Identifier Management
 
 - (NSString *)generateIDFA {
-    NSString *idfa = [[IDFAManager sharedManager] generateIDFA];
-    if (!idfa) {
+    self.error = nil;
+    NSString *value = [[IDFAManager sharedManager] generateIDFA];
+    if (!value) {
         self.error = [[IDFAManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *idfaDict = @{@"value": idfa, @"lastUpdated": [NSDate date]};
-        NSString *idfaPath = [identityDir stringByAppendingPathComponent:@"advertising_id.plist"];
-        [idfaDict writeToFile:idfaPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"IDFA"] = idfa;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-    }
-    
-    return idfa;
+    return [self saveCustomValue:value forType:@"IDFA"] ? value : nil;
 }
 
 - (NSString *)generateIDFV {
-    NSString *idfv = [[IDFVManager sharedManager] generateIDFV];
-    if (!idfv) {
+    self.error = nil;
+    NSString *value = [[IDFVManager sharedManager] generateIDFV];
+    if (!value) {
         self.error = [[IDFVManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *idfvDict = @{@"value": idfv, @"lastUpdated": [NSDate date]};
-        NSString *idfvPath = [identityDir stringByAppendingPathComponent:@"vendor_id.plist"];
-        [idfvDict writeToFile:idfvPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"IDFV"] = idfv;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-    }
-    
-    return idfv;
+    return [self saveCustomValue:value forType:@"IDFV"] ? value : nil;
 }
 
 - (NSString *)generateDeviceName {
-    NSString *deviceName = [[DeviceNameManager sharedManager] generateDeviceName];
-    if (!deviceName) {
+    self.error = nil;
+    NSString *value = [[DeviceNameManager sharedManager] generateDeviceName];
+    if (!value) {
         self.error = [[DeviceNameManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *deviceNameDict = @{@"value": deviceName, @"lastUpdated": [NSDate date]};
-        NSString *deviceNamePath = [identityDir stringByAppendingPathComponent:@"device_name.plist"];
-        [deviceNameDict writeToFile:deviceNamePath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"DeviceName"] = deviceName;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-    }
-    
-    return deviceName;
+    return [self saveCustomValue:value forType:@"DeviceName"] ? value : nil;
 }
 
 - (NSString *)generateSerialNumber {
     self.error = nil;
-    
-    NSString *serialNumber = [[SerialNumberManager sharedManager] generateSerialNumber];
-    if (!serialNumber) {
+    NSString *value = [[SerialNumberManager sharedManager] generateSerialNumber];
+    if (!value) {
         self.error = [[SerialNumberManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *serialDict = @{@"value": serialNumber, @"lastUpdated": [NSDate date]};
-        NSString *serialPath = [identityDir stringByAppendingPathComponent:@"serial_number.plist"];
-        [serialDict writeToFile:serialPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"SerialNumber"] = serialNumber;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-    }
-    
-    return serialNumber;
+    return [self saveCustomValue:value forType:@"SerialNumber"] ? value : nil;
 }
 
 - (NSDictionary *)generateIOSVersion {
-    self.error = nil;
-    
-    NSDictionary *versionInfo = [[IOSVersionInfo sharedManager] generateIOSVersionInfo];
-    if (!versionInfo) {
-        self.error = [[IOSVersionInfo sharedManager] lastError];
+    NSError *generationError = nil;
+    if (![self regenerateAllEnabledIdentifiersWithError:&generationError]) {
+        self.error = generationError;
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSMutableDictionary *versionDict = [NSMutableDictionary dictionaryWithDictionary:versionInfo];
-        [versionDict setObject:[NSDate date] forKey:@"lastUpdated"];
-        
-        NSString *versionPath = [identityDir stringByAppendingPathComponent:@"ios_version.plist"];
-        [versionDict writeToFile:versionPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        
-        // Store both version and build in device_ids.plist
-        deviceIds[@"IOSVersion"] = [NSString stringWithFormat:@"%@ (%@)", versionInfo[@"version"], versionInfo[@"build"]];
-        deviceIds[@"IOSBuild"] = versionInfo[@"build"];  // Keep this for compatibility
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] Stored iOS version: %@ with build: %@", versionInfo[@"version"], versionInfo[@"build"]);
-    }
-    
-    return versionInfo;
+    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:[self profileIdentityPath]];
+    NSError *readError = nil;
+    PXProfileManifest *manifest = [store activeManifestWithError:&readError];
+    self.error = readError;
+    return manifest.operatingSystem;
 }
 
 - (NSDictionary *)generateiOSVersion {
@@ -550,126 +261,51 @@ static void PXIdentifierManagerScopedAppsChanged(CFNotificationCenterRef center,
 }
 
 - (NSString *)generateSystemBootUUID {
-    NSString *identityDir = [self profileIdentityPath];
-    NSDictionary *projection = [NSDictionary dictionaryWithContentsOfFile:
-        [identityDir stringByAppendingPathComponent:@"system_boot_uuid.plist"]];
-    NSString *bootUUID = projection[@"value"];
-    if (![[NSUUID alloc] initWithUUIDString:bootUUID]) {
-        self.error = [NSError errorWithDomain:@"com.hydra.projectx.profile-manifest"
-                                         code:102
-                                     userInfo:@{NSLocalizedDescriptionKey: @"The active Profile has no valid virtual Boot UUID"}];
-        return nil;
-    }
-    [[SystemUUIDManager sharedManager] setCurrentBootUUID:bootUUID];
-    return bootUUID;
+    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:[self profileIdentityPath]];
+    NSError *readError = nil;
+    PXProfileManifest *manifest = [store activeManifestWithError:&readError];
+    self.error = readError;
+    return manifest.virtualSession.bootUUID;
 }
 
 - (NSString *)generateDyldCacheUUID {
-    NSString *dyldUUID = [[DyldCacheUUIDManager sharedManager] generateDyldCacheUUID];
-    if (!dyldUUID) {
+    self.error = nil;
+    NSString *value = [[DyldCacheUUIDManager sharedManager] generateDyldCacheUUID];
+    if (!value) {
         self.error = [[DyldCacheUUIDManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": dyldUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"dyld_cache_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"DyldCacheUUID"] = dyldUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 🆔 Generated Dyld Cache UUID: %@", dyldUUID);
-    }
-    
-    return dyldUUID;
+    return [self saveCustomValue:value forType:@"DyldCacheUUID"] ? value : nil;
 }
 
 - (NSString *)generatePasteboardUUID {
-    NSString *pasteboardUUID = [[PasteboardUUIDManager sharedManager] generatePasteboardUUID];
-    if (!pasteboardUUID) {
+    self.error = nil;
+    NSString *value = [[PasteboardUUIDManager sharedManager] generatePasteboardUUID];
+    if (!value) {
         self.error = [[PasteboardUUIDManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": pasteboardUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"pasteboard_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"PasteboardUUID"] = pasteboardUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 🆔 Generated Pasteboard UUID: %@", pasteboardUUID);
-    }
-    
-    return pasteboardUUID;
+    return [self saveCustomValue:value forType:@"PasteboardUUID"] ? value : nil;
 }
 
 - (NSString *)generateKeychainUUID {
-    NSString *keychainUUID = [[KeychainUUIDManager sharedManager] generateKeychainUUID];
-    if (!keychainUUID) {
+    self.error = nil;
+    NSString *value = [[KeychainUUIDManager sharedManager] generateKeychainUUID];
+    if (!value) {
         self.error = [[KeychainUUIDManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": keychainUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"keychain_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"KeychainUUID"] = keychainUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 🔑 Generated Keychain UUID: %@", keychainUUID);
-    }
-    
-    return keychainUUID;
+    return [self saveCustomValue:value forType:@"KeychainUUID"] ? value : nil;
 }
 
 - (NSString *)generateUserDefaultsUUID {
-    NSString *userDefaultsUUID = [[UserDefaultsUUIDManager sharedManager] generateUserDefaultsUUID];
-    if (!userDefaultsUUID) {
+    self.error = nil;
+    NSString *value = [[UserDefaultsUUIDManager sharedManager] generateUserDefaultsUUID];
+    if (!value) {
         self.error = [[UserDefaultsUUIDManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": userDefaultsUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"userdefaults_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"UserDefaultsUUID"] = userDefaultsUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 🔄 Generated UserDefaults UUID: %@", userDefaultsUUID);
-    }
-    
-    return userDefaultsUUID;
+    return [self saveCustomValue:value forType:@"UserDefaultsUUID"] ? value : nil;
 }
 
 - (NSString *)generateAppGroupUUID {
@@ -680,92 +316,30 @@ static void PXIdentifierManagerScopedAppsChanged(CFNotificationCenterRef center,
 }
 
 - (NSString *)generateCoreDataUUID {
-    NSString *coreDataUUID = [[CoreDataUUIDManager sharedManager] generateCoreDataUUID];
-    if (!coreDataUUID) {
+    self.error = nil;
+    NSString *value = [[CoreDataUUIDManager sharedManager] generateCoreDataUUID];
+    if (!value) {
         self.error = [[CoreDataUUIDManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": coreDataUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"coredata_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"CoreDataUUID"] = coreDataUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 📦 Generated Core Data UUID: %@", coreDataUUID);
-    }
-    
-    return coreDataUUID;
+    return [self saveCustomValue:value forType:@"CoreDataUUID"] ? value : nil;
 }
 
 - (NSString *)generateSystemUptime {
-    NSString *profilePath = [self profileIdentityPath];
-NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptimeForProfile:profilePath];
+    NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptime];
     if (uptime <= 0) {
         self.error = [[UptimeManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        // Format uptime as string (in seconds)
-        NSString *uptimeString = [NSString stringWithFormat:@"%.0f", uptime];
-        NSDictionary *uptimeDict = @{@"value": uptimeString, @"lastUpdated": [NSDate date]};
-        NSString *uptimePath = [identityDir stringByAppendingPathComponent:@"system_uptime.plist"];
-        [uptimeDict writeToFile:uptimePath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"SystemUptime"] = uptimeString;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 🕒 Generated System Uptime: %.2f hours", uptime / 3600.0);
-    }
-    
-    // Return formatted uptime string (in hours for display)
     return [NSString stringWithFormat:@"%.2f hours", uptime / 3600.0];
 }
 
 - (NSString *)generateBootTime {
-    NSString *profilePath = [self profileIdentityPath];
-NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:profilePath];
+    NSDate *bootTime = [[UptimeManager sharedManager] currentBootTime];
     if (!bootTime) {
         self.error = [[UptimeManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *bootTimeDict = @{@"value": bootTime, @"lastUpdated": [NSDate date]};
-        NSString *bootTimePath = [identityDir stringByAppendingPathComponent:@"boot_time.plist"];
-        [bootTimeDict writeToFile:bootTimePath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        
-        // Store timestamp as a string for consistency
-        NSString *bootTimeString = [NSString stringWithFormat:@"%.0f", [bootTime timeIntervalSince1970]];
-        deviceIds[@"BootTime"] = bootTimeString;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 🕒 Generated Boot Time: %@", bootTime);
-    }
-    
-    // Return formatted date for display
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
     formatter.dateStyle = NSDateFormatterMediumStyle;
     formatter.timeStyle = NSDateFormatterMediumStyle;
@@ -817,16 +391,9 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
                                         error:(NSError **)error {
 
     PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory];
-    NSError *migrationError = nil;
-    if (![store migrateLegacyProfileIfNeededWithError:&migrationError]) {
-        if (error) *error = migrationError;
-        return NO;
-    }
     PXProfileManifest *previousManifest = [store activeManifestWithError:nil];
 
-    NSString *profileDirectory = [identityDirectory stringByDeletingLastPathComponent];
-    PXTrustedCarrierPolicyStore *carrierPolicyStore = [[PXTrustedCarrierPolicyStore alloc]
-        initWithProfileDirectory:profileDirectory];
+    PXTrustedCarrierPolicyStore *carrierPolicyStore = [[PXTrustedCarrierPolicyStore alloc] init];
     NSError *carrierPolicyError = nil;
     NSSet<NSString *> *trustedCarrierIDs = [carrierPolicyStore trustedCarrierIDsWithError:&carrierPolicyError];
     if (!trustedCarrierIDs) {
@@ -938,6 +505,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     input.installIdentifierKeysByBundleIdentifier = [installIdentifierKeys copy];
     input.graphicsHostCapabilities = graphicsHostCapabilities;
     input.networkType = [environmentPolicy selectedNetworkTypeWithError:&environmentPolicyError];
+    input.networkTypes = [environmentPolicy selectedNetworkTypesWithError:&environmentPolicyError];
     if (environmentPolicyError) {
         if (error) *error = environmentPolicyError;
         return NO;
@@ -954,7 +522,6 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         return NO;
     }
 
-    [deviceManager setCurrentDeviceModel:manifest.device[@"identifier"]];
     [[IOSVersionInfo sharedManager] setCurrentIOSVersionInfo:manifest.operatingSystem];
     if (configuredLocation) {
         [[LocationSpoofingManager sharedManager]
@@ -992,7 +559,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
 }
 
 - (NSDictionary *)dictionaryAtPath:(NSString *)path {
-    return [NSDictionary dictionaryWithContentsOfFile:path];
+    return PXProfileReadDictionary(path);
 }
 
 - (void)setIdentifierEnabled:(BOOL)enabled forType:(NSString *)type {
@@ -1052,12 +619,10 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
                 [self generateCoreDataUUID];
             }
             else if ([type isEqualToString:@"SystemUptime"]) {
-                NSString *profilePath = [self profileIdentityPath];
-[[UptimeManager sharedManager] generateUptimeForProfile:profilePath];
+                [[UptimeManager sharedManager] currentUptime];
             }
             else if ([type isEqualToString:@"BootTime"]) {
-                NSString *profilePath = [self profileIdentityPath];
-[[UptimeManager sharedManager] generateBootTimeForProfile:profilePath];
+                [[UptimeManager sharedManager] currentBootTime];
             }
             else if ([type isEqualToString:@"WiFi"]) {
                 // Use WiFiManager to generate new WiFi info
@@ -1119,18 +684,12 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
     }
     
-    // Always ensure device model exists
-    if (![self currentValueForIdentifier:@"DeviceModel"]) {
-        NSString *deviceModel = [self generateDeviceModel];
-        if (deviceModel) [self setCustomDeviceModel:deviceModel];
-    }
-    
     // For WiFi specifically, also update the SystemConfiguration plist
     if ([type isEqualToString:@"WiFi"]) {
         NSString *securitySettingsPath = PXSecuritySettingsPath();
-        NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
+        NSMutableDictionary *settingsDict = [PXProfileReadDictionary(securitySettingsPath) mutableCopy] ?: [NSMutableDictionary dictionary];
         settingsDict[@"wifiSpoofEnabled"] = @(enabled);
-        [settingsDict writeToFile:securitySettingsPath atomically:YES];
+        PXProfileWriteDictionary(settingsDict, securitySettingsPath);
         
         // Also update in UserDefaults for compatibility
         NSUserDefaults *settings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
@@ -1145,9 +704,9 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     // For Battery specifically, update the SystemConfiguration plist
     else if ([type isEqualToString:@"Battery"]) {
         NSString *securitySettingsPath = PXSecuritySettingsPath();
-        NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
+        NSMutableDictionary *settingsDict = [PXProfileReadDictionary(securitySettingsPath) mutableCopy] ?: [NSMutableDictionary dictionary];
         settingsDict[@"batterySpoofEnabled"] = @(enabled);
-        [settingsDict writeToFile:securitySettingsPath atomically:YES];
+        PXProfileWriteDictionary(settingsDict, securitySettingsPath);
         
         // Also update in UserDefaults for compatibility
         NSUserDefaults *settings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
@@ -1162,9 +721,9 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     // For DeviceTheme, update the SystemConfiguration plist
     else if ([type isEqualToString:@"DeviceTheme"]) {
         NSString *securitySettingsPath = PXSecuritySettingsPath();
-        NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
+        NSMutableDictionary *settingsDict = [PXProfileReadDictionary(securitySettingsPath) mutableCopy] ?: [NSMutableDictionary dictionary];
         settingsDict[@"deviceThemeSpoofEnabled"] = @(enabled);
-        [settingsDict writeToFile:securitySettingsPath atomically:YES];
+        PXProfileWriteDictionary(settingsDict, securitySettingsPath);
         
         // Also update in UserDefaults for compatibility
         NSUserDefaults *settings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
@@ -1187,25 +746,15 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
 #pragma mark - Current Values
 
 - (NSString *)currentValueForIdentifier:(NSString *)type {
-    // Special hardcoded serial number for Filza and ADManager
-    if ([type isEqualToString:@"SerialNumber"]) {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (bundleID) {
-            if ([bundleID isEqualToString:@"com.tigisoftware.Filza"] || 
-                [bundleID isEqualToString:@"com.tigisoftware.ADManager"]) {
-                // Return hardcoded serial number for these specific apps
-                NSString *hardcodedSerial = @"FCCC15Q4HG04";
-                PXLog(@"[WeaponX] 📱 Returning hardcoded serial number for %@: %@", bundleID, hardcodedSerial);
-                return hardcodedSerial;
-            }
-        }
+    if ([type isEqualToString:@"DeviceTheme"]) {
+        NSString *theme = PXCurrentProfileValue(@"deviceTheme")[@"value"];
+        return [theme isKindOfClass:[NSString class]] ? theme : nil;
     }
-    
     // First try to get from profile-specific storage
     NSString *identityDir = [self profileIdentityPath];
     if (identityDir) {
         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+        NSDictionary *deviceIds = PXProfileReadDictionary(deviceIdsPath);
         NSString *value = deviceIds[type];
         
         if (value) {
@@ -1216,7 +765,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         // If not found in combined file, try type-specific files
         if ([type isEqualToString:@"IDFA"]) {
             NSString *idfaPath = [identityDir stringByAppendingPathComponent:@"advertising_id.plist"];
-            NSDictionary *idfaDict = [NSDictionary dictionaryWithContentsOfFile:idfaPath];
+            NSDictionary *idfaDict = PXProfileReadDictionary(idfaPath);
             if (idfaDict && idfaDict[@"value"]) {
                 PXLog(@"Found IDFA in advertising_id.plist: %@", idfaDict[@"value"]);
                 return idfaDict[@"value"];
@@ -1224,7 +773,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         } 
         else if ([type isEqualToString:@"IDFV"]) {
             NSString *idfvPath = [identityDir stringByAppendingPathComponent:@"vendor_id.plist"];
-            NSDictionary *idfvDict = [NSDictionary dictionaryWithContentsOfFile:idfvPath];
+            NSDictionary *idfvDict = PXProfileReadDictionary(idfvPath);
             if (idfvDict && idfvDict[@"value"]) {
                 PXLog(@"Found IDFV in vendor_id.plist: %@", idfvDict[@"value"]);
                 return idfvDict[@"value"];
@@ -1232,7 +781,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
         else if ([type isEqualToString:@"SystemBootUUID"]) {
             NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"system_boot_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
+            NSDictionary *uuidDict = PXProfileReadDictionary(uuidPath);
             if (uuidDict && uuidDict[@"value"]) {
                 PXLog(@"Found SystemBootUUID in system_boot_uuid.plist: %@", uuidDict[@"value"]);
                 return uuidDict[@"value"];
@@ -1240,7 +789,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
         else if ([type isEqualToString:@"DyldCacheUUID"]) {
             NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"dyld_cache_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
+            NSDictionary *uuidDict = PXProfileReadDictionary(uuidPath);
             if (uuidDict && uuidDict[@"value"]) {
                 PXLog(@"Found DyldCacheUUID in dyld_cache_uuid.plist: %@", uuidDict[@"value"]);
                 return uuidDict[@"value"];
@@ -1248,7 +797,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
         else if ([type isEqualToString:@"PasteboardUUID"]) {
             NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"pasteboard_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
+            NSDictionary *uuidDict = PXProfileReadDictionary(uuidPath);
             if (uuidDict && uuidDict[@"value"]) {
                 PXLog(@"Found PasteboardUUID in pasteboard_uuid.plist: %@", uuidDict[@"value"]);
                 return uuidDict[@"value"];
@@ -1256,7 +805,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
         else if ([type isEqualToString:@"KeychainUUID"]) {
             NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"keychain_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
+            NSDictionary *uuidDict = PXProfileReadDictionary(uuidPath);
             if (uuidDict && uuidDict[@"value"]) {
                 PXLog(@"Found KeychainUUID in keychain_uuid.plist: %@", uuidDict[@"value"]);
                 return uuidDict[@"value"];
@@ -1264,7 +813,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
         else if ([type isEqualToString:@"UserDefaultsUUID"]) {
             NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"userdefaults_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
+            NSDictionary *uuidDict = PXProfileReadDictionary(uuidPath);
             if (uuidDict && uuidDict[@"value"]) {
                 PXLog(@"Found UserDefaultsUUID in userdefaults_uuid.plist: %@", uuidDict[@"value"]);
                 return uuidDict[@"value"];
@@ -1272,7 +821,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
         else if ([type isEqualToString:@"CoreDataUUID"]) {
             NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"coredata_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
+            NSDictionary *uuidDict = PXProfileReadDictionary(uuidPath);
             if (uuidDict && uuidDict[@"value"]) {
                 PXLog(@"Found CoreDataUUID in coredata_uuid.plist: %@", uuidDict[@"value"]);
                 return uuidDict[@"value"];
@@ -1280,7 +829,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
         else if ([type isEqualToString:@"AppInstallUUID"]) {
             NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"appinstall_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
+            NSDictionary *uuidDict = PXProfileReadDictionary(uuidPath);
             if (uuidDict && uuidDict[@"value"]) {
                 PXLog(@"Found AppInstallUUID in appinstall_uuid.plist: %@", uuidDict[@"value"]);
                 return uuidDict[@"value"];
@@ -1288,7 +837,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
         else if ([type isEqualToString:@"AppContainerUUID"]) {
             NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"appcontainer_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
+            NSDictionary *uuidDict = PXProfileReadDictionary(uuidPath);
             if (uuidDict && uuidDict[@"value"]) {
                 PXLog(@"Found AppContainerUUID in appcontainer_uuid.plist: %@", uuidDict[@"value"]);
                 return uuidDict[@"value"];
@@ -1296,7 +845,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
         else if ([type isEqualToString:@"AppGroupUUID"]) {
             NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"appgroup_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
+            NSDictionary *uuidDict = PXProfileReadDictionary(uuidPath);
             if (uuidDict && uuidDict[@"value"]) {
                 PXLog(@"Found AppGroupUUID in appgroup_uuid.plist: %@", uuidDict[@"value"]);
                 return uuidDict[@"value"];
@@ -1304,7 +853,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
         else if ([type isEqualToString:@"IMEI"]) {
             NSString *imeiPath = [identityDir stringByAppendingPathComponent:@"imei.plist"];
-            NSDictionary *imeiDict = [NSDictionary dictionaryWithContentsOfFile:imeiPath];
+            NSDictionary *imeiDict = PXProfileReadDictionary(imeiPath);
             if (imeiDict && imeiDict[@"value"]) {
                 PXLog(@"Found IMEI in imei.plist: %@", imeiDict[@"value"]);
                 return imeiDict[@"value"];
@@ -1312,7 +861,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
         else if ([type isEqualToString:@"MEID"]) {
             NSString *meidPath = [identityDir stringByAppendingPathComponent:@"meid.plist"];
-            NSDictionary *meidDict = [NSDictionary dictionaryWithContentsOfFile:meidPath];
+            NSDictionary *meidDict = PXProfileReadDictionary(meidPath);
             if (meidDict && meidDict[@"value"]) {
                 PXLog(@"Found MEID in meid.plist: %@", meidDict[@"value"]);
                 return meidDict[@"value"];
@@ -1320,7 +869,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
         else if ([type isEqualToString:@"DeviceModel"]) {
             NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-            NSDictionary *modelDict = [NSDictionary dictionaryWithContentsOfFile:modelPath];
+            NSDictionary *modelDict = PXProfileReadDictionary(modelPath);
             if (modelDict && modelDict[@"value"]) {
                 PXLog(@"Found DeviceModel in device_model.plist: %@", modelDict[@"value"]);
                 return modelDict[@"value"];
@@ -1328,7 +877,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
         else if ([type isEqualToString:@"DeviceName"]) {
             NSString *deviceNamePath = [identityDir stringByAppendingPathComponent:@"device_name.plist"];
-            NSDictionary *deviceNameDict = [NSDictionary dictionaryWithContentsOfFile:deviceNamePath];
+            NSDictionary *deviceNameDict = PXProfileReadDictionary(deviceNamePath);
             if (deviceNameDict && deviceNameDict[@"value"]) {
                 PXLog(@"Found DeviceName in device_name.plist: %@", deviceNameDict[@"value"]);
                 return deviceNameDict[@"value"];
@@ -1336,7 +885,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
         else if ([type isEqualToString:@"SerialNumber"]) {
             NSString *serialPath = [identityDir stringByAppendingPathComponent:@"serial_number.plist"];
-            NSDictionary *serialDict = [NSDictionary dictionaryWithContentsOfFile:serialPath];
+            NSDictionary *serialDict = PXProfileReadDictionary(serialPath);
             if (serialDict && serialDict[@"value"]) {
                 PXLog(@"Found SerialNumber in serial_number.plist: %@", serialDict[@"value"]);
                 return serialDict[@"value"];
@@ -1345,7 +894,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         else if ([type isEqualToString:@"WiFi"]) {
             // Check for WiFi info in the profile
             NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
-            NSDictionary *wifiInfo = [NSDictionary dictionaryWithContentsOfFile:wifiInfoPath];
+            NSDictionary *wifiInfo = PXProfileReadDictionary(wifiInfoPath);
             if (wifiInfo && wifiInfo[@"ssid"] && wifiInfo[@"bssid"]) {
                 NSString *formattedValue = [NSString stringWithFormat:@"%@ (%@)", wifiInfo[@"ssid"], wifiInfo[@"bssid"]];
                 PXLog(@"Found WiFi info in wifi_info.plist: %@", formattedValue);
@@ -1353,28 +902,26 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
             }
         }
         else if ([type isEqualToString:@"StorageSystem"]) {
-            NSString *storagePath = [identityDir stringByAppendingPathComponent:@"storage.plist"];
-            NSDictionary *storageDict = [NSDictionary dictionaryWithContentsOfFile:storagePath];
+            NSDictionary *storageDict = PXCurrentProfileValue(@"storage");
             if (storageDict && storageDict[@"TotalStorage"] && storageDict[@"FreeStorage"]) {
                 NSString *formattedStorage = [NSString stringWithFormat:@"Total: %@ GB, Free: %@ GB", 
                                              storageDict[@"TotalStorage"], 
                                              storageDict[@"FreeStorage"]];
-                PXLog(@"Found Storage info in storage.plist: %@", formattedStorage);
+                PXLog(@"Found Storage info in current Profile: %@", formattedStorage);
                 return formattedStorage;
             }
         }
         else if ([type isEqualToString:@"BatteryLevel"] || [type isEqualToString:@"LowPowerMode"]) {
-            NSString *batteryPath = [identityDir stringByAppendingPathComponent:@"battery_info.plist"];
-            NSDictionary *batteryDict = [NSDictionary dictionaryWithContentsOfFile:batteryPath];
+            NSDictionary *batteryDict = PXCurrentProfileValue(@"batteryInfo");
             if (batteryDict && batteryDict[type]) {
-                PXLog(@"Found %@ in battery_info.plist: %@", type, batteryDict[type]);
+                PXLog(@"Found %@ in current Profile: %@", type, batteryDict[type]);
                 return batteryDict[type];
             }
         }
         else if ([type isEqualToString:@"SystemUptime"]) {
             NSString *profilePath = [self profileIdentityPath];
 NSString *uptimePath = [profilePath stringByAppendingPathComponent:@"system_uptime.plist"];
-NSDictionary *uptimeDict = [NSDictionary dictionaryWithContentsOfFile:uptimePath];
+NSDictionary *uptimeDict = PXProfileReadDictionary(uptimePath);
 if (uptimeDict && uptimeDict[@"value"]) {
     NSTimeInterval uptime = [uptimeDict[@"value"] doubleValue];
     if (uptime > 0) {
@@ -1388,7 +935,7 @@ return @"Not Set";
         else if ([type isEqualToString:@"BootTime"]) {
             NSString *profilePath = [self profileIdentityPath];
 NSString *bootTimePath = [profilePath stringByAppendingPathComponent:@"boot_time.plist"];
-NSDictionary *bootTimeDict = [NSDictionary dictionaryWithContentsOfFile:bootTimePath];
+NSDictionary *bootTimeDict = PXProfileReadDictionary(bootTimePath);
 if (bootTimeDict && bootTimeDict[@"value"]) {
     NSDate *bootTime = bootTimeDict[@"value"];
     if ([bootTime isKindOfClass:[NSDate class]]) {
@@ -1415,7 +962,7 @@ return @"Not Set";
         if (identityDir) {
             // First try to get from device_ids.plist
             NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+            NSDictionary *deviceIds = PXProfileReadDictionary(deviceIdsPath);
             NSString *version = deviceIds[@"IOSVersion"];
             
             // If we have a pre-formatted version string, use it
@@ -1434,20 +981,12 @@ return @"Not Set";
             
             // If not found in combined file, try ios_version.plist
             NSString *versionPath = [identityDir stringByAppendingPathComponent:@"ios_version.plist"];
-            NSDictionary *versionDict = [NSDictionary dictionaryWithContentsOfFile:versionPath];
+            NSDictionary *versionDict = PXProfileReadDictionary(versionPath);
             if (versionDict && versionDict[@"version"] && versionDict[@"build"]) {
                 NSString *formattedVersion = [NSString stringWithFormat:@"%@ (%@)", versionDict[@"version"], versionDict[@"build"]];
                 PXLog(@"[WeaponX] Formatted iOS version from ios_version.plist: %@", formattedVersion);
                 return formattedVersion;
             }
-        }
-        
-        // Fall back to IOSVersionInfo if profile-specific value not found
-        NSDictionary *currentVersion = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
-        if (currentVersion && currentVersion[@"version"] && currentVersion[@"build"]) {
-            NSString *formattedVersion = [NSString stringWithFormat:@"%@ (%@)", currentVersion[@"version"], currentVersion[@"build"]];
-            PXLog(@"[WeaponX] Formatted iOS version from IOSVersionInfo: %@", formattedVersion);
-            return formattedVersion;
         }
         
         PXLog(@"[WeaponX] No iOS version information found");
@@ -1614,15 +1153,15 @@ return @"Not Set";
     
     // Special handling for SystemUptime/BootTime
     if ([type isEqualToString:@"SystemUptime"]) {
-        NSString *profilePath = [self profileIdentityPath];
-NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptimeForProfile:profilePath];
+        NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptime];
+        if (uptime <= 0) return nil;
         NSString *result = [NSString stringWithFormat:@"%.2f hours", uptime / 3600.0];
         PXLog(@"Default SystemUptime value: %@", result);
         return result;
     }
     else if ([type isEqualToString:@"BootTime"]) {
-        NSString *profilePath = [self profileIdentityPath];
-NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:profilePath];
+        NSDate *bootTime = [[UptimeManager sharedManager] currentBootTime];
+        if (!bootTime) return nil;
         NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
         formatter.dateStyle = NSDateFormatterMediumStyle;
         formatter.timeStyle = NSDateFormatterMediumStyle;
@@ -1631,51 +1170,6 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         return result;
     }
     
-    // Fallback to the original implementation if profile-specific value not found
-    PXLog(@"Falling back to default implementation for %@", type);
-    if ([type isEqualToString:@"IDFA"]) {
-        NSString *result = [[IDFAManager sharedManager] currentIDFA];
-        PXLog(@"Default IDFA value: %@", result ?: @"nil");
-        return result;
-    } else if ([type isEqualToString:@"IDFV"]) {
-        NSString *result = [[IDFVManager sharedManager] currentIDFV];
-        PXLog(@"Default IDFV value: %@", result ?: @"nil");
-        return result;
-    } else if ([type isEqualToString:@"SystemBootUUID"]) {
-        NSString *result = [[SystemUUIDManager sharedManager] currentBootUUID];
-        PXLog(@"Default SystemBootUUID value: %@", result ?: @"nil");
-        return result;
-    } else if ([type isEqualToString:@"DyldCacheUUID"]) {
-        NSString *result = [[DyldCacheUUIDManager sharedManager] currentDyldCacheUUID];
-        PXLog(@"Default DyldCacheUUID value: %@", result ?: @"nil");
-        return result;
-    } else if ([type isEqualToString:@"PasteboardUUID"]) {
-        NSString *result = [[PasteboardUUIDManager sharedManager] currentPasteboardUUID];
-        PXLog(@"Default PasteboardUUID value: %@", result ?: @"nil");
-        return result;
-    } else if ([type isEqualToString:@"KeychainUUID"]) {
-        NSString *result = [[KeychainUUIDManager sharedManager] currentKeychainUUID];
-        PXLog(@"Default KeychainUUID value: %@", result ?: @"nil");
-        return result;
-    } else if ([type isEqualToString:@"UserDefaultsUUID"]) {
-        NSString *result = [[UserDefaultsUUIDManager sharedManager] currentUserDefaultsUUID];
-        PXLog(@"Default UserDefaultsUUID value: %@", result ?: @"nil");
-        return result;
-    } else if ([type isEqualToString:@"CoreDataUUID"]) {
-        NSString *result = [[CoreDataUUIDManager sharedManager] currentCoreDataUUID];
-        PXLog(@"Default CoreDataUUID value: %@", result ?: @"nil");
-        return result;
-    } else if ([type isEqualToString:@"DeviceName"]) {
-        NSString *result = [[DeviceNameManager sharedManager] currentDeviceName];
-        PXLog(@"Default DeviceName value: %@", result ?: @"nil");
-        return result;
-    } else if ([type isEqualToString:@"SerialNumber"]) {
-        NSString *result = [[SerialNumberManager sharedManager] currentSerialNumber];
-        PXLog(@"Default SerialNumber value: %@", result ?: @"nil");
-        return result;
-    }
-    
-    PXLog(@"No value found for %@", type);
     return nil;
 }
 
@@ -1807,19 +1301,24 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
 }
 
 - (BOOL)setApplicationInScope:(NSString *)bundleID enabled:(BOOL)enabled error:(NSError **)error {
+    return [self applyApplicationScopeChanges:@{bundleID ?: @"": @(enabled)} error:error];
+}
+
+- (BOOL)applyApplicationScopeChanges:(NSDictionary<NSString *, NSNumber *> *)changes
+                               error:(NSError **)error {
     @synchronized(self) {
-    if (bundleID.length == 0 || !PXAppIdentityBundleIsEligible(bundleID, YES, NO)) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"com.hydra.projectx"
-                                         code:3001
-                                     userInfo:@{NSLocalizedDescriptionKey: @"Target App is not eligible"}];
-        }
-        return NO;
-    }
+    if (changes.count == 0) return YES;
     NSMutableDictionary<NSString *, NSMutableDictionary<NSString *, id> *> *updatedApps =
         [PXEligibleScopedApplications([self scopedAppsSnapshot]) mutableCopy];
-    [updatedApps removeObjectsForKeys:PXScopeKeysMatchingBundleIdentifier(updatedApps, bundleID)];
-    if (enabled) {
+    for (NSString *bundleID in changes) {
+        if (bundleID.length == 0 || !PXAppIdentityBundleIsEligible(bundleID, YES, NO) ||
+            ![changes[bundleID] isKindOfClass:[NSNumber class]]) {
+            if (error) *error = [NSError errorWithDomain:@"com.hydra.projectx" code:3001
+                userInfo:@{NSLocalizedDescriptionKey: @"Target App is not eligible"}];
+            return NO;
+        }
+        [updatedApps removeObjectsForKeys:PXScopeKeysMatchingBundleIdentifier(updatedApps, bundleID)];
+        if (![changes[bundleID] boolValue]) continue;
         LSApplicationProxy *appProxy = [LSApplicationProxy applicationProxyForIdentifier:bundleID];
         if (!appProxy) {
             if (error) {
@@ -2236,7 +1735,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     saveDict[@"SettingsInitialized"] = @YES;
     
     // Save main settings
-    BOOL success = [saveDict writeToFile:prefsFile atomically:YES];
+    BOOL success = PXProfileWriteDictionary(saveDict, prefsFile);
     if (!success) {
         self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
                                       code:4005 
@@ -2278,7 +1777,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     }
     
     // Load dictionary from main settings file
-    NSDictionary *loadedDict = [NSDictionary dictionaryWithContentsOfFile:prefsFile];
+    NSDictionary *loadedDict = PXProfileReadDictionary(prefsFile);
 
     // Load scope before any settings migration writes. A missing or malformed
     // main settings plist must never erase a valid global target selection.
@@ -2526,81 +2025,23 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
 #pragma mark - Custom Values
 
 - (BOOL)saveCustomValue:(NSString *)value forType:(NSString *)type {
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (!identityDir) {
-        PXLog(@"[WeaponX] ❌ Failed to get profile identity path");
+    NSDictionary<NSString *, NSString *> *keys = @{
+        @"IDFA": @"idfa", @"IDFV": @"idfv", @"DeviceName": @"deviceName",
+        @"SerialNumber": @"serialNumber", @"IMEI": @"imei", @"MEID": @"meid",
+        @"DyldCacheUUID": @"dyldCacheUUID", @"PasteboardUUID": @"pasteboardUUID",
+        @"KeychainUUID": @"keychainUUID", @"UserDefaultsUUID": @"userDefaultsUUID",
+        @"CoreDataUUID": @"coreDataUUID"
+    };
+    NSString *key = keys[type];
+    PXProfileStore *store = [[PXProfileStore alloc] initWithIdentityDirectory:[self profileIdentityPath]];
+    NSError *saveError = nil;
+    if (![store replaceActiveIdentifierValue:value forKey:key error:&saveError]) {
+        self.error = saveError;
         return NO;
     }
-    
-    // Create the dictionary with timestamp
-    NSDictionary *valueDict = @{@"value": value, @"lastUpdated": [NSDate date]};
-    
-    // Determine the file path based on type
-    NSString *filePath = nil;
-    if ([type isEqualToString:@"IDFA"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"advertising_id.plist"];
-    } else if ([type isEqualToString:@"IDFV"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"vendor_id.plist"];
-    } else if ([type isEqualToString:@"DeviceName"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"device_name.plist"];
-    } else if ([type isEqualToString:@"SerialNumber"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"serial_number.plist"];
-    } else if ([type isEqualToString:@"IMEI"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"imei.plist"];
-    } else if ([type isEqualToString:@"MEID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"meid.plist"];
-    } else if ([type isEqualToString:@"SystemBootUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"system_boot_uuid.plist"];
-    } else if ([type isEqualToString:@"DyldCacheUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"dyld_cache_uuid.plist"];
-    } else if ([type isEqualToString:@"PasteboardUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"pasteboard_uuid.plist"];
-    } else if ([type isEqualToString:@"KeychainUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"keychain_uuid.plist"];
-    } else if ([type isEqualToString:@"UserDefaultsUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"userdefaults_uuid.plist"];
-    } else if ([type isEqualToString:@"CoreDataUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"coredata_uuid.plist"];
-    } else {
-        PXLog(@"[WeaponX] ❌ Unknown identifier type: %@", type);
-        return NO;
-    }
-    
-    // Write the value to file
-    BOOL success = [valueDict writeToFile:filePath atomically:YES];
-    
-    // Also update the combined device_ids.plist
-    if (success) {
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[type] = value;
-        success = [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] ✅ Custom %@ saved: %@", type, value);
-        
-        // For specific types, also update the respective manager
-        if ([type isEqualToString:@"IDFA"]) {
-            [[IDFAManager sharedManager] setCurrentIDFA:value];
-        } else if ([type isEqualToString:@"IDFV"]) {
-            [[IDFVManager sharedManager] setCurrentIDFV:value];
-        } else if ([type isEqualToString:@"SystemBootUUID"]) {
-            [[SystemUUIDManager sharedManager] setCurrentBootUUID:value];
-        } else if ([type isEqualToString:@"DyldCacheUUID"]) {
-            [[DyldCacheUUIDManager sharedManager] setCurrentDyldCacheUUID:value];
-        } else if ([type isEqualToString:@"PasteboardUUID"]) {
-            [[PasteboardUUIDManager sharedManager] setCurrentPasteboardUUID:value];
-        } else if ([type isEqualToString:@"KeychainUUID"]) {
-            [[KeychainUUIDManager sharedManager] setCurrentKeychainUUID:value];
-        } else if ([type isEqualToString:@"UserDefaultsUUID"]) {
-            [[UserDefaultsUUIDManager sharedManager] setCurrentUserDefaultsUUID:value];
-        } else if ([type isEqualToString:@"CoreDataUUID"]) {
-            [[CoreDataUUIDManager sharedManager] setCurrentCoreDataUUID:value];
-        }
-    }
-    
-    return success;
+    self.error = nil;
+    [self publishProfileGenerationNotifications];
+    return YES;
 }
 
 - (BOOL)setCustomIDFA:(NSString *)value {
@@ -2716,8 +2157,8 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
 
 - (BOOL)setCustomSystemBootUUID:(NSString *)value {
     if (![self validateUUID:value]) return NO;
-    NSDictionary *projection = [NSDictionary dictionaryWithContentsOfFile:
-        [[self profileIdentityPath] stringByAppendingPathComponent:@"system_boot_uuid.plist"]];
+    NSDictionary *projection = PXProfileReadDictionary(
+        [[self profileIdentityPath] stringByAppendingPathComponent:@"system_boot_uuid.plist"]);
     if ([projection[@"value"] isEqualToString:value]) {
         return YES;
     }
@@ -2804,7 +2245,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     
     // First, check the device_model.plist file for detailed specifications
     NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-    NSDictionary *modelDict = [NSDictionary dictionaryWithContentsOfFile:modelPath];
+    NSDictionary *modelDict = PXProfileReadDictionary(modelPath);
     
     if (modelDict && modelDict.count > 0) {
         return modelDict;
@@ -2812,7 +2253,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     
     // If not found in dedicated file, check the combined device_ids.plist
     NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-    NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+    NSDictionary *deviceIds = PXProfileReadDictionary(deviceIdsPath);
     
     if (deviceIds && deviceIds[@"DeviceModel"]) {
         NSMutableDictionary *specs = [NSMutableDictionary dictionary];
@@ -2928,9 +2369,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     NSString *theme = themes[randomIndex];
     
     // Save the theme to the profile
-    [self setCustomDeviceTheme:theme];
-    
-    return theme;
+    return [self setCustomDeviceTheme:theme] ? theme : nil;
 }
 
 - (NSString *)toggleDeviceTheme {
@@ -2946,9 +2385,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     }
     
     // Save the new theme
-    [self setCustomDeviceTheme:newTheme];
-    
-    return newTheme;
+    return [self setCustomDeviceTheme:newTheme] ? newTheme : nil;
 }
 
 - (BOOL)setCustomDeviceTheme:(NSString *)value {
@@ -2958,30 +2395,17 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         return NO;
     }
     
-    NSString *identityDir = [self profileIdentityPath];
-    BOOL success = NO;
-    
-    if (identityDir) {
-        // Create dictionary with theme value
-        NSDictionary *themeDict = @{
-            @"value": value,
-            @"lastUpdated": [NSDate date]
-        };
-        
-        // Save to device_theme.plist
-        NSString *themePath = [identityDir stringByAppendingPathComponent:@"device_theme.plist"];
-        success = [themeDict writeToFile:themePath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: [NSMutableDictionary dictionary];
-        
-        // Add theme to device_ids.plist
-        deviceIds[@"DeviceTheme"] = value;
-        
-        success = [deviceIds writeToFile:deviceIdsPath atomically:YES];
+    BOOL success = PXSetCurrentProfileValue(@"deviceTheme", @{@"value": value});
+    if (!success) {
+        self.error = [NSError errorWithDomain:@"com.hydra.projectx.profile"
+                                         code:5
+                                     userInfo:@{NSLocalizedDescriptionKey: @"Failed to save Device Theme"}];
+    } else {
+        self.error = nil;
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                             CFSTR("com.hydra.projectx.toggleDeviceThemeSpoof"),
+                                             NULL, NULL, YES);
     }
-    
     return success;
 }
 
@@ -3009,21 +2433,21 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
 - (BOOL)isCanvasFingerprintProtectionEnabled {
     // Read directly from the plist file - SINGLE SOURCE OF TRUTH
     NSString *securitySettingsPath = PXSecuritySettingsPath();
-    NSDictionary *settingsDict = [NSDictionary dictionaryWithContentsOfFile:securitySettingsPath];
+    NSDictionary *settingsDict = PXProfileReadDictionary(securitySettingsPath);
     return PXGraphicsProtectionIsEnabledForSettings(settingsDict);
 }
 
 - (BOOL)setCanvasFingerprintProtection:(BOOL)enabled {
     // Read and update the plist file directly - SINGLE SOURCE OF TRUTH
     NSString *securitySettingsPath = PXSecuritySettingsPath();
-    NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
+    NSMutableDictionary *settingsDict = [PXProfileReadDictionary(securitySettingsPath) mutableCopy] ?: [NSMutableDictionary dictionary];
     
     // Update with both key names for compatibility
     settingsDict[@"canvasFingerprintingEnabled"] = @(enabled);
     settingsDict[@"CanvasFingerprint"] = @(enabled);
     
     // Write back to the file
-    BOOL success = [settingsDict writeToFile:securitySettingsPath atomically:YES];
+    BOOL success = PXProfileWriteDictionary(settingsDict, securitySettingsPath);
     
     // Also update our in-memory settings to keep them in sync
     if (success) {

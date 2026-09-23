@@ -1,7 +1,6 @@
 #import "ProjectX.h"
 #import "DeviceModelManager.h"
 #import "IdentifierManager.h"
-#import "ProfileManager.h"
 #import "ProjectXLogging.h"
 #import "PXRootHidePath.h"
 #import "PXProcessHookPolicy.h"
@@ -133,7 +132,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Load the plist file safely
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
+        NSDictionary *plistDict = PXProfileReadDictionary(validPath);
         if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
             scopedAppsCacheTimestamp = [NSDate date];
             return scopedAppsCache;
@@ -204,20 +203,6 @@ static BOOL isSpoofingEnabled(void) {
                 IdentifierManager *manager = [NSClassFromString(@"IdentifierManager") sharedManager];
                 shouldSpoof = [manager isIdentifierEnabled:@"DeviceModel"];
                 
-                // If the direct check fails, try profile settings directly
-                if (!shouldSpoof) {
-                    // Try to get profile settings directly from file
-                    NSString *profilesPath = PXProfilesDirectoryPath();
-                    NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-                    NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-                    
-                    NSString *profileId = centralInfo[@"ProfileId"];
-                    if (profileId) {
-                        NSString *profileSettingsPath = [profilesPath stringByAppendingPathComponent:[profileId stringByAppendingPathComponent:@"settings.plist"]];
-                        NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:profileSettingsPath];
-                        shouldSpoof = [settings[@"deviceModelEnabled"] boolValue];
-                    }
-                }
             }
         }
     } @catch (NSException *exception) {
@@ -241,42 +226,30 @@ static NSString *getSpoofedDeviceModel() {
         NSString *deviceModel = nil;
         
         // METHOD 1: Try direct access from profile plist
-        NSString *profilesPath = PXProfilesDirectoryPath();
-        NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
+        NSString *centralInfoPath = PXCurrentProfileInfoPath();
+        NSDictionary *centralInfo = PXProfileReadDictionary(centralInfoPath);
         
-        NSString *profileId = centralInfo[@"ProfileId"];
-        if (profileId) {
+        if (centralInfo) {
             // Build path to identity directory
-            NSString *identityDir = [[profilesPath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
+            NSString *identityDir = PXCurrentProfileIdentityValuesPath();
             
             // First try device_model.plist (detailed specs)
             NSString *deviceModelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-            NSDictionary *deviceModelDict = [NSDictionary dictionaryWithContentsOfFile:deviceModelPath];
+            NSDictionary *deviceModelDict = PXProfileReadDictionary(deviceModelPath);
             deviceModel = deviceModelDict[@"value"];
             
             if (!deviceModel || deviceModel.length == 0) {
                 // Fallback to device_ids.plist (combined storage)
                 NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-                NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+                NSDictionary *deviceIds = PXProfileReadDictionary(deviceIdsPath);
                 deviceModel = deviceIds[@"DeviceModel"];
             }
         }
         
-        // METHOD 2: Use DeviceModelManager as fallback
-        if (!deviceModel.length && NSClassFromString(@"DeviceModelManager")) {
-            DeviceModelManager *deviceManager = [NSClassFromString(@"DeviceModelManager") sharedManager];
-            deviceModel = [deviceManager currentDeviceModel] ?: [deviceManager generateDeviceModel];
-        }
-        
-        // METHOD 3: Emergency fallback
-        if (!deviceModel.length) {
-            deviceModel = @"iPhone14,6"; // iPhone SE (3rd Gen) as fallback
-        }
-        
         return deviceModel;
     } @catch (NSException *exception) {
-        return @"iPhone14,6"; // Fallback on exception
+        PXLog(@"[DeviceSpec] Unable to read generated device model: %@", exception);
+        return nil;
     }
 }
 
@@ -298,17 +271,15 @@ static NSDictionary *getDeviceSpecs() {
     
     @try {
         // METHOD 1: Try to get specs directly from profile plist files
-        NSString *profilesPath = PXProfilesDirectoryPath();
-        NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
+        NSString *centralInfoPath = PXCurrentProfileInfoPath();
+        NSDictionary *centralInfo = PXProfileReadDictionary(centralInfoPath);
         
-        NSString *profileId = centralInfo[@"ProfileId"];
-        if (profileId) {
-            NSString *identityDir = [[profilesPath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
+        if (centralInfo) {
+            NSString *identityDir = PXCurrentProfileIdentityValuesPath();
             
             // First try device_model.plist (has all detailed specs)
             NSString *deviceModelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-            NSDictionary *deviceModelDict = [NSDictionary dictionaryWithContentsOfFile:deviceModelPath];
+            NSDictionary *deviceModelDict = PXProfileReadDictionary(deviceModelPath);
             
             if (deviceModelDict && deviceModelDict.count > 0) {
                 // We have the full specs in the plist, use them directly
@@ -325,7 +296,7 @@ static NSDictionary *getDeviceSpecs() {
             
             // Fallback to device_ids.plist and reconstruct specs
             NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+            NSDictionary *deviceIds = PXProfileReadDictionary(deviceIdsPath);
             
             if (deviceIds && deviceIds[@"DeviceModel"]) {
                 // Reconstruct specs from device_ids.plist

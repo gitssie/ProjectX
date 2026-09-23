@@ -14,17 +14,20 @@
 @interface CarrierSelectionViewController ()
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UISearchController *searchController;
+@property (nonatomic, strong) UIBarButtonItem *confirmButton;
 @property (nonatomic, copy) NSArray<NSString *> *visibleCountries;
 @property (nonatomic, copy) NSDictionary<NSString *, NSArray<PXTrustedCarrierOption *> *> *visibleOptions;
 @property (nonatomic, copy, readwrite) NSArray<PXTrustedCarrierOption *> *carrierOptions;
 @property (nonatomic, copy, readwrite) NSSet<NSString *> *selectedCarrierIDs;
+@property (nonatomic, copy) NSSet<NSString *> *originalSelectedCarrierIDs;
+@property (nonatomic, assign) BOOL confirmAfterSearchDismissal;
 @end
 
 @implementation CarrierSelectionViewController
 
 - (instancetype)initWithCarrierOptions:(NSArray<PXTrustedCarrierOption *> *)carrierOptions selectedCarrierIDs:(NSSet<NSString *> *)selectedCarrierIDs {
     self = [super initWithNibName:nil bundle:nil];
-    if (self) { _carrierOptions = [carrierOptions copy] ?: @[]; _selectedCarrierIDs = [selectedCarrierIDs copy] ?: [NSSet set]; _visibleCountries = @[]; _visibleOptions = @{}; }
+    if (self) { _carrierOptions = [carrierOptions copy] ?: @[]; _selectedCarrierIDs = [selectedCarrierIDs copy] ?: [NSSet set]; _originalSelectedCarrierIDs = _selectedCarrierIDs; _visibleCountries = @[]; _visibleOptions = @{}; }
     return self;
 }
 
@@ -35,6 +38,7 @@
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
     if (!self.usesPushNavigation) { [self configureModalActions]; }
     [self configureSearch];
+    if (self.usesPushNavigation) { [self configureConfirmButton]; }
     [self configureTable];
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(handleLanguagePreferenceChanged:)
@@ -58,6 +62,10 @@
     if (!self.usesPushNavigation) {
         self.navigationItem.leftBarButtonItem.accessibilityLabel = PXLocalizedString(@"carrier.cancel.accessibility_label");
         self.navigationItem.rightBarButtonItem.accessibilityLabel = PXLocalizedString(@"carrier.done.accessibility_label");
+    } else {
+        self.confirmButton.title = PXLocalizedString(@"image.carrier.confirm.title");
+        self.confirmButton.accessibilityLabel = PXLocalizedString(@"image.carrier.confirm.title");
+        self.confirmButton.accessibilityHint = PXLocalizedString(@"image.carrier.confirm.hint");
     }
     [self rebuildVisibleOptions];
     if (self.view.window) {
@@ -77,12 +85,33 @@
 - (void)configureSearch {
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
+    self.searchController.delegate = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
+    if (self.usesPushNavigation) self.searchController.automaticallyShowsCancelButton = NO;
     self.searchController.searchBar.placeholder = PXLocalizedString(@"image.carrier.search.placeholder");
     self.searchController.searchBar.accessibilityLabel = PXLocalizedString(@"image.carrier.search.accessibility_label");
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.definesPresentationContext = YES;
+}
+
+- (void)configureConfirmButton {
+    UIBarButtonItem *button = [[UIBarButtonItem alloc]
+        initWithTitle:PXLocalizedString(@"image.carrier.confirm.title")
+                style:UIBarButtonItemStyleDone
+               target:self
+               action:@selector(handleConfirmTapped:)];
+    button.accessibilityIdentifier = @"image-carrier-confirm";
+    button.accessibilityLabel = PXLocalizedString(@"image.carrier.confirm.title");
+    button.accessibilityHint = PXLocalizedString(@"image.carrier.confirm.hint");
+    self.confirmButton = button;
+    self.navigationItem.rightBarButtonItem = button;
+    [self updateConfirmButtonState];
+}
+
+- (void)updateConfirmButtonState {
+    self.confirmButton.enabled = self.selectedCarrierIDs.count == 1 &&
+        ![self.selectedCarrierIDs isEqualToSet:self.originalSelectedCarrierIDs];
 }
 
 - (void)configureTable {
@@ -106,6 +135,13 @@
 }
 
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController { [self rebuildVisibleOptions]; }
+
+- (void)didDismissSearchController:(UISearchController *)searchController {
+    (void)searchController;
+    if (!self.confirmAfterSearchDismissal) { return; }
+    self.confirmAfterSearchDismissal = NO;
+    [self commitSelectedCarrier];
+}
 
 - (void)rebuildVisibleOptions {
     NSString *query = [self.searchController.searchBar.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
@@ -160,19 +196,8 @@
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     PXTrustedCarrierOption *option = self.visibleOptions[self.visibleCountries[(NSUInteger)indexPath.section]][(NSUInteger)indexPath.row];
     if (self.usesPushNavigation) {
-        if ([self.delegate respondsToSelector:@selector(carrierSelectionViewController:canCommitSelectedCarrierID:)] &&
-            ![self.delegate carrierSelectionViewController:self
-                              canCommitSelectedCarrierID:option.stableIdentifier]) {
-            return;
-        }
-        NSSet<NSString *> *selection = [NSSet setWithObject:option.stableIdentifier];
-        if ([self.delegate respondsToSelector:@selector(carrierSelectionViewController:persistSelectedCarrierIDs:)] &&
-            ![self.delegate carrierSelectionViewController:self
-                                persistSelectedCarrierIDs:selection]) {
-            return;
-        }
-        self.selectedCarrierIDs = selection;
-        [self.delegate carrierSelectionViewController:self didCommitSelectedCarrierIDs:self.selectedCarrierIDs];
+        self.selectedCarrierIDs = [NSSet setWithObject:option.stableIdentifier];
+        [self updateConfirmButtonState];
         [self.tableView reloadData];
         UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, PXLocalizedFormat(@"image.carrier.selected_announcement", option.countryName, option.carrierName));
         return;
@@ -181,6 +206,31 @@
     if ([updated containsObject:option.stableIdentifier]) { [updated removeObject:option.stableIdentifier]; } else { [updated addObject:option.stableIdentifier]; }
     self.selectedCarrierIDs = updated;
     [self.tableView reloadData];
+}
+
+- (void)handleConfirmTapped:(UIBarButtonItem *)sender {
+    if (!sender.enabled || self.selectedCarrierIDs.count != 1) { return; }
+    if (self.searchController.isActive) {
+        self.confirmAfterSearchDismissal = YES;
+        self.searchController.active = NO;
+        return;
+    }
+    [self commitSelectedCarrier];
+}
+
+- (void)commitSelectedCarrier {
+    if (!self.confirmButton.enabled || self.selectedCarrierIDs.count != 1) { return; }
+    NSString *selectedCarrierID = self.selectedCarrierIDs.anyObject;
+    if ([self.delegate respondsToSelector:@selector(carrierSelectionViewController:canCommitSelectedCarrierID:)] &&
+        ![self.delegate carrierSelectionViewController:self canCommitSelectedCarrierID:selectedCarrierID]) {
+        return;
+    }
+    if ([self.delegate respondsToSelector:@selector(carrierSelectionViewController:persistSelectedCarrierIDs:)] &&
+        ![self.delegate carrierSelectionViewController:self persistSelectedCarrierIDs:self.selectedCarrierIDs]) {
+        return;
+    }
+    [self.delegate carrierSelectionViewController:self didCommitSelectedCarrierIDs:self.selectedCarrierIDs];
+    [self.navigationController popViewControllerAnimated:YES];
 }
 
 - (void)handleCancelTapped:(UIBarButtonItem *)sender { [self dismissViewControllerAnimated:YES completion:nil]; }

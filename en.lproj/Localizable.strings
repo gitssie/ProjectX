@@ -243,7 +243,7 @@
 "image.settings.environment.footer" = "Selections persist as pending configuration and never alter the active environment.";
 "image.settings.open_hint" = "Double tap to configure.";
 "image.settings.model.title" = "Environment model";
-"image.settings.network.title" = "Network type";
+"image.settings.network.title" = "Available networks";
 "image.settings.carrier.title" = "Carrier";
 "image.settings.region.title" = "Region and time zone";
 "image.settings.location.title" = "Smart location";
@@ -270,7 +270,7 @@
 "image.target_apps.section.user" = "User apps";
 "image.target_apps.section.system" = "System apps";
 "image.target_apps.selection_summary" = "%ld apps selected";
-"image.target_apps.selection_hint" = "Double tap to select or deselect this app. The choice is saved immediately.";
+"image.target_apps.selection_hint" = "Double tap to select or deselect this app, then tap Confirm to save.";
 "image.target_apps.loading.title" = "Loading installed apps";
 "image.target_apps.loading.message" = "Looking for eligible apps on this device.";
 "image.target_apps.failure.title" = "Apps could not be loaded";
@@ -283,8 +283,8 @@
 "image.target_apps.search_empty.message" = "Try a different app name or Bundle ID.";
 "image.target_apps.extension_one" = "%@ · Includes 1 extension";
 "image.target_apps.extension_count" = "%@ · Includes %ld extensions";
-"image.target_apps.selected_announcement" = "App selected. The choice is saved.";
-"image.target_apps.deselected_announcement" = "App deselected. The choice is saved.";
+"image.target_apps.selected_announcement" = "App selected. Tap Confirm to save.";
+"image.target_apps.deselected_announcement" = "App deselected. Tap Confirm to save.";
 "image.target_apps.persistence_failed.title" = "Selection could not be saved";
 "image.target_apps.persistence_failed.message" = "The previous app selection was restored.";
 "image.target_apps.persistence_failed.announcement" = "The app selection could not be saved. The previous selection remains active.";
@@ -321,14 +321,14 @@
 "image.model.catalog.footer" = "%ld catalog models. %@";
 "image.model.complete_identity.footer" = "Compatible variants are inferred from this device's immutable hardware. A matching GPU name alone does not make a model selectable.";
 "image.model.complete_identity.detail" = "ID %@ · CPU %@\nGPU %@ · Metal %@\nDisplay %@ · Storage %@ GB";
-"image.model.selection_hint" = "Double tap to select this complete model identity. The choice is saved for the next environment.";
-"image.model.selected_announcement" = "Environment model selected.";
+"image.model.selection_hint" = "Double tap to select this complete model identity, then tap Confirm to save.";
+"image.model.selected_announcement" = "Environment model selected. Tap Confirm to save.";
 "image.model.other_group" = "Other models";
 "image.model.use_this_device.section" = "Recommended";
 "image.model.use_this_device.title" = "Use This Device";
 "image.model.use_this_device.detail" = "%@ (%@)\nDetected %@ · %@";
 "image.model.use_this_device.summary" = "Use This Device — %@";
-"image.model.use_this_device.selection_hint" = "Double tap to use the physical device model and graphics capabilities for the next environment.";
+"image.model.use_this_device.selection_hint" = "Double tap to select the physical device model, then tap Confirm to save.";
 "image.model.use_this_device.selected_announcement" = "The physical device model is selected for the next environment.";
 "image.model.incompatible.status_unavailable" = "Unavailable on this device";
 "image.model.incompatible.summary" = "Requires %@ with %@. This device reports %@ with %@.";
@@ -350,18 +350,20 @@
 "image.model.incompatible.alert.message" = "Detected physical device: %@ (%@) — %@ · %@.\nRequested model: %@ (%@) — %@ · %@.\n%@\nThis combination cannot form a reliable real-device profile. Use This Device is recommended.";
 "image.model.incompatible.use_this_device.action" = "Use This Device";
 
-"image.network.title" = "Choose network type";
+"image.network.title" = "Available networks";
 "image.network.accessibility.list" = "Network type choices";
 "image.network.unspecified" = "Not configured";
 "image.network.wifi" = "Wi-Fi";
-"image.network.5g" = "5G (NR)";
+"image.network.5g" = "5G";
 "image.network.4g" = "4G (LTE)";
 "image.network.3g" = "3G";
 "image.network.2g" = "2G";
 "image.network.none" = "No network";
-"image.network.footer" = "Only compatible network types can be used with the selected environment model.";
-"image.network.selection_hint" = "Double tap to select this network type. The choice is saved for the next environment.";
-"image.network.selected_announcement" = "Network type selected.";
+"image.network.footer" = "Select all networks available in the next environment, then tap Confirm. No network cannot be combined with other choices. 5G requires a compatible model and carrier.";
+"image.network.selection_hint" = "Double tap to toggle this network, then tap Confirm to save.";
+"image.network.selected_announcement" = "Network selection updated. Tap Confirm to save.";
+"image.network.confirm.title" = "Confirm";
+"image.network.summary.separator" = ", ";
 "image.network.unsupported" = "Unavailable for selected model";
 "image.network.unsupported_announcement" = "This network type is unavailable for the selected environment model.";
 
@@ -369,9 +371,11 @@
 "image.carrier.accessibility.list" = "Carrier catalog";
 "image.carrier.search.placeholder" = "Search carrier or region";
 "image.carrier.search.accessibility_label" = "Search carriers";
-"image.carrier.footer" = "The selected carrier derives the coherent region, language, time zone, and network identity.";
-"image.carrier.selection_hint" = "Double tap to choose this carrier. The choice is saved for the next environment.";
-"image.carrier.selected_announcement" = "%@, %@ selected.";
+"image.carrier.footer" = "Choose a carrier, then tap Confirm to save it for the next environment. The carrier determines the region, language, time zone, and network identity.";
+"image.carrier.selection_hint" = "Double tap to choose this carrier, then tap Confirm to save.";
+"image.carrier.selected_announcement" = "%@, %@ selected. Tap Confirm to save.";
+"image.carrier.confirm.title" = "Confirm";
+"image.carrier.confirm.hint" = "Save this carrier for the next environment.";
 "image.carrier.network_incompatible.announcement" = "This carrier does not support the selected 5G network type.";
 "image.carrier.network_incompatible.title" = "Carrier is incompatible";
 "image.carrier.network_incompatible.message" = "Choose a carrier with 5G support or select another network type first.";
@@ -410,11 +414,12 @@
 "image.location.mismatch.warning" = "Location differs from carrier region";
 "image.location.clear.title" = "Clear saved location";
 "image.location.clear.accessibility_label" = "Clear saved location";
-"image.location.clear.accessibility_hint" = "Clear the location saved for the next environment without changing the current detection result.";
+"image.location.clear.accessibility_hint" = "Select removal of the saved location, then tap Confirm.";
 "image.location.clear.announcement" = "Smart location cleared.";
-"image.location.use.title" = "Use this location";
-"image.location.use.accessibility_label" = "Use this location";
-"image.location.use.accessibility_hint" = "Save the detected GEO IP location for the next environment.";
+"image.location.use.title" = "Select this location";
+"image.location.selected.title" = "Location selected";
+"image.location.use.accessibility_label" = "Select this location";
+"image.location.use.accessibility_hint" = "Select the detected GEO IP location, then tap Confirm.";
 "image.location.use.announcement" = "Smart location saved for the next environment.";
 
 "language.title" = "Language";
@@ -426,7 +431,7 @@
 "language.option.simplified_chinese.detail" = "Use Simplified Chinese in XenSpace.";
 "language.option.english.title" = "English";
 "language.option.english.detail" = "Use English in XenSpace.";
-"language.selection_hint" = "Double tap to use this interface language immediately.";
+"language.selection_hint" = "Double tap to select this interface language, then tap Confirm to apply.";
 "language.changed_announcement" = "XenSpace interface language updated.";
 
 "diagnostics.title" = "Environment details";

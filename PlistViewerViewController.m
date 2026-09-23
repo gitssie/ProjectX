@@ -1,3 +1,4 @@
+#import "PXRootHidePath.h"
 #import "PlistViewerViewController.h"
 
 @interface PlistViewerViewController () <UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate>
@@ -551,4 +552,4 @@
     }
 }
 
-@end 
+@end

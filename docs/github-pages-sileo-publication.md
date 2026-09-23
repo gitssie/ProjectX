@@ -8,7 +8,7 @@ XenSpace is built on the maintainer's Mac and published from an isolated tempora
 2. Run the first publication locally.
 3. In GitHub, open **Settings → Pages**.
 4. Choose **Deploy from a branch**, branch **gh-pages**, folder **/(root)**.
-5. Add `https://gitssie.github.io/ProjectX/` to Sileo.
+5. Add `https://gitssie.github.io/ProjectX` to Sileo (no trailing slash).
 
 ## Publish a fresh build
 

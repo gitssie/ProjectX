@@ -235,7 +235,7 @@ PXGraphicsIdentity *PXPrepareCurrentProcessGraphicsIdentity(void) {
         IdentifierManager *manager = PXAppIdentityManagerForCurrentProcess(NULL);
         NSString *identityDirectory = [manager profileIdentityPath];
         NSDictionary<NSString *, id> *settings =
-            [NSDictionary dictionaryWithContentsOfFile:PXSecuritySettingsPath()];
+            PXProfileReadDictionary(PXSecuritySettingsPath());
         if (!manager || !PXGraphicsProtectionIsEnabledForSettings(settings) ||
             identityDirectory.length == 0) {
             return nil;

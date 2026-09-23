@@ -146,7 +146,6 @@ static void testPhysicalDeviceSelectionModePersistsWithModelSnapshot(void) {
 static void testPhysicalSelectionAtomicallyClearsIncompatibleCustomSelection(void) {
     NSString *filePath = CreatePolicyPath();
     NSDictionary<NSString *, id> *staleCustomPolicy = @{
-        @"schemaVersion": @1,
         @"modelIdentifier": @"iPhone15,2",
         @"modelSelectionMode": @"custom",
         @"networkType": @"5g-nr",
@@ -183,6 +182,29 @@ static void testNetworkCompatibilityRejectsUnsupported5G(void) {
     assert([store saveSelectedNetworkType:PXEnvironmentNetworkType4GLTE
                                modelRecord:legacyModel
                                      error:nil]);
+    RemovePolicyFixture(filePath);
+}
+
+static void testNetworkTypesPersistTogetherAndModelChangeDropsOnlyIncompatibleType(void) {
+    NSString *filePath = CreatePolicyPath();
+    PXEnvironmentPolicyStore *store = [[PXEnvironmentPolicyStore alloc] initWithFilePath:filePath];
+    NSSet<NSNumber *> *combined = [NSSet setWithObjects:
+        @(PXEnvironmentNetworkTypeWiFi), @(PXEnvironmentNetworkType4GLTE),
+        @(PXEnvironmentNetworkType5GNR), nil];
+    assert([store saveSelectedNetworkTypes:combined
+                              modelRecord:ModelRecord(@"iPhone13,2", YES)
+                                    error:nil]);
+    assert([[store selectedNetworkTypesWithError:nil] isEqualToSet:combined]);
+    assert([store selectedNetworkTypeWithError:nil] == PXEnvironmentNetworkTypeWiFi);
+    NSDictionary *persisted = [NSDictionary dictionaryWithContentsOfFile:filePath];
+    assert(([persisted[@"networkTypes"] isEqualToArray:@[@"wifi", @"5g-nr", @"4g-lte"]]));
+    assert((![store saveSelectedNetworkTypes:[NSSet setWithObjects:
+        @(PXEnvironmentNetworkTypeWiFi), @(PXEnvironmentNetworkTypeNone), nil]
+                                modelRecord:ModelRecord(@"iPhone13,2", YES)
+                                      error:nil]));
+    assert([store savePhysicalDeviceModelRecord:ModelRecord(@"iPhone9,2", NO) error:nil]);
+    assert(([[store selectedNetworkTypesWithError:nil] isEqualToSet:[NSSet setWithObjects:
+        @(PXEnvironmentNetworkTypeWiFi), @(PXEnvironmentNetworkType4GLTE), nil]]));
     RemovePolicyFixture(filePath);
 }
 
@@ -306,7 +328,6 @@ static void testPersistingHighLevelPolicyRemovesLegacyDerivedValues(void) {
     NSString *filePath = CreatePolicyPath();
     NSDictionary<NSString *, id> *model = ModelRecord(@"iPhone9,4", YES);
     NSDictionary<NSString *, id> *legacyPolicy = @{
-        @"schemaVersion": @1,
         @"modelRecord": model,
         @"networkType": @"4g-lte",
         @"pendingChanges": @YES,
@@ -330,7 +351,6 @@ static void testPersistingHighLevelPolicyRemovesLegacyDerivedValues(void) {
     NSDictionary<NSString *, id> *persisted = [NSDictionary
         dictionaryWithContentsOfFile:filePath];
     NSSet<NSString *> *expectedKeys = [NSSet setWithArray:@[
-        @"schemaVersion",
         @"modelIdentifier",
         @"modelSelectionMode",
         @"networkType",
@@ -385,6 +405,7 @@ int main(void) {
         testPhysicalDeviceSelectionModePersistsWithModelSnapshot();
         testPhysicalSelectionAtomicallyClearsIncompatibleCustomSelection();
         testNetworkCompatibilityRejectsUnsupported5G();
+        testNetworkTypesPersistTogetherAndModelChangeDropsOnlyIncompatibleType();
         testAppliedStateClearsPendingButRetainsNextGenerationDefaults();
         testPendingStateCanBeRestoredWithoutChangingAppliedMetadata();
         testPrunedTargetIdentityCannotBeRecreatedBeforeNewGenerationApplies();

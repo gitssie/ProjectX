@@ -39,6 +39,7 @@ typedef NS_ENUM(NSInteger, PXTargetAppsViewState) {
 @property (nonatomic, copy) NSArray<NSArray<PXTargetApp *> *> *visibleSections;
 @property (nonatomic, copy) NSArray<NSString *> *visibleSectionTitleKeys;
 @property (nonatomic, strong) NSMutableSet<NSString *> *selectedBundleIdentifiers;
+@property (nonatomic, copy) NSSet<NSString *> *originalSelectedBundleIdentifiers;
 @property (nonatomic, copy) PXTargetAppsSelectionCompletion selectionCompletion;
 @property (nonatomic, assign) PXTargetAppsViewState viewState;
 @property (nonatomic, strong) id<PXSafariTargetReadinessProviding> safariReadinessProvider;
@@ -90,6 +91,12 @@ typedef NS_ENUM(NSInteger, PXTargetAppsViewState) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = PXLocalizedString(@"image.target_apps.title");
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
+        initWithTitle:PXLocalizedString(@"image.network.confirm.title")
+                style:UIBarButtonItemStyleDone
+               target:self
+               action:@selector(handleConfirmTapped:)];
+    [self updateConfirmButtonState];
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
     [self configureTableView];
@@ -111,6 +118,7 @@ typedef NS_ENUM(NSInteger, PXTargetAppsViewState) {
 - (void)handleLanguagePreferenceChanged:(NSNotification *)notification {
     (void)notification;
     self.title = PXLocalizedString(@"image.target_apps.title");
+    self.navigationItem.rightBarButtonItem.title = PXLocalizedString(@"image.network.confirm.title");
     self.tableView.accessibilityLabel = PXLocalizedString(@"image.target_apps.accessibility.list");
     self.searchController.searchBar.placeholder = PXLocalizedString(@"image.target_apps.search.placeholder");
     self.searchController.searchBar.accessibilityLabel = PXLocalizedString(@"image.target_apps.search.accessibility_label");
@@ -146,6 +154,7 @@ typedef NS_ENUM(NSInteger, PXTargetAppsViewState) {
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
+    self.searchController.automaticallyShowsCancelButton = NO;
     self.searchController.searchBar.placeholder = PXLocalizedString(@"image.target_apps.search.placeholder");
     self.searchController.searchBar.accessibilityLabel = PXLocalizedString(@"image.target_apps.search.accessibility_label");
     self.searchController.searchBar.accessibilityIdentifier = @"image-target-apps-search";
@@ -190,6 +199,8 @@ typedef NS_ENUM(NSInteger, PXTargetAppsViewState) {
         NSSet<NSString *> *selectedBundleIdentifiers = reconciliation.selectedBundleIdentifiers;
         dispatch_async(dispatch_get_main_queue(), ^{
             self.selectedBundleIdentifiers = [selectedBundleIdentifiers mutableCopy];
+            self.originalSelectedBundleIdentifiers = [selectedBundleIdentifiers copy];
+            [self updateConfirmButtonState];
             [self handleLocalAppEnumerationSucceededWithApps:apps];
             if (self.selectionCompletion) {
                 self.selectionCompletion([selectedBundleIdentifiers copy]);
@@ -525,38 +536,48 @@ typedef NS_ENUM(NSInteger, PXTargetAppsViewState) {
 
 - (void)toggleSelectionForApp:(PXTargetApp *)app {
     BOOL wasSelected = [self.selectedBundleIdentifiers containsObject:app.bundleIdentifier];
-    NSError *persistenceError = nil;
-    if (![[IdentifierManager sharedManager]
-        setApplicationInScope:app.bundleIdentifier
-        enabled:!wasSelected
-        error:&persistenceError]) {
-        [self.tableView reloadData];
-        NSLog(@"[ProjectX] Target App selection persistence failed: %@",
-              persistenceError.localizedDescription);
-        UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification,
-                                        PXLocalizedString(@"image.target_apps.persistence_failed.announcement"));
-        UIAlertController *alert = [UIAlertController
-            alertControllerWithTitle:PXLocalizedString(@"image.target_apps.persistence_failed.title")
-            message:PXLocalizedString(@"image.target_apps.persistence_failed.message")
-            preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:PXLocalizedString(@"navigation.close")
-                                                style:UIAlertActionStyleCancel
-                                              handler:nil]];
-        [self presentViewController:alert animated:YES completion:nil];
-        return;
-    }
     if (wasSelected) {
         [self.selectedBundleIdentifiers removeObject:app.bundleIdentifier];
     } else {
         [self.selectedBundleIdentifiers addObject:app.bundleIdentifier];
     }
-    if (self.selectionCompletion) {
-        self.selectionCompletion([self.selectedBundleIdentifiers copy]);
-    }
+    [self updateConfirmButtonState];
     [self.tableView reloadData];
     UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, wasSelected
         ? PXLocalizedString(@"image.target_apps.deselected_announcement")
         : PXLocalizedString(@"image.target_apps.selected_announcement"));
+}
+
+- (void)updateConfirmButtonState {
+    self.navigationItem.rightBarButtonItem.enabled = self.viewState == PXTargetAppsViewStateReady &&
+        ![self.selectedBundleIdentifiers isEqualToSet:self.originalSelectedBundleIdentifiers ?: [NSSet set]];
+}
+
+- (void)handleConfirmTapped:(UIBarButtonItem *)sender {
+    if (!sender.enabled) return;
+    NSMutableDictionary<NSString *, NSNumber *> *changes = [NSMutableDictionary dictionary];
+    NSMutableSet<NSString *> *allIDs = [self.originalSelectedBundleIdentifiers mutableCopy];
+    [allIDs unionSet:self.selectedBundleIdentifiers];
+    for (NSString *bundleID in allIDs) {
+        BOOL wasSelected = [self.originalSelectedBundleIdentifiers containsObject:bundleID];
+        BOOL isSelected = [self.selectedBundleIdentifiers containsObject:bundleID];
+        if (wasSelected != isSelected) changes[bundleID] = @(isSelected);
+    }
+    NSError *persistenceError = nil;
+    if (![[IdentifierManager sharedManager] applyApplicationScopeChanges:changes error:&persistenceError]) {
+        NSLog(@"[ProjectX] Target App selection persistence failed: %@", persistenceError.localizedDescription);
+        UIAlertController *alert = [UIAlertController
+            alertControllerWithTitle:PXLocalizedString(@"image.target_apps.persistence_failed.title")
+            message:PXLocalizedString(@"image.target_apps.persistence_failed.message")
+            preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:PXLocalizedString(@"navigation.close")
+                                                style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+    if (self.selectionCompletion) self.selectionCompletion([self.selectedBundleIdentifiers copy]);
+    self.searchController.active = NO;
+    [self.navigationController popViewControllerAnimated:YES];
 }
 
 - (NSString *)detailTextForApp:(PXTargetApp *)app {

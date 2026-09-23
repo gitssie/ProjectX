@@ -3,7 +3,6 @@
 #import "PXRootHidePath.h"
 
 // Define file paths
-#define BATTERY_PLIST_PATH [PXPreferencesDirectoryPath() stringByAppendingPathComponent:@"com.weaponx.battery.plist"]
 #define kBatteryLevelKey @"BatteryLevel"
 #define kLastUpdatedKey @"LastUpdated"
 
@@ -160,116 +159,21 @@ static BatteryManager *sharedManager = nil;
 
 #pragma mark - File Operations
 
-// Private helper to get the path to profile-specific battery_info.plist
-- (NSString *)batteryInfoPathForCurrentProfile {
-    // First try to get active profile ID
-    NSString *profilesPath = PXCurrentProfileInfoPath();
-    NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
-    NSString *profileId = currentProfileInfo[@"ProfileId"];
-    
-    if (!profileId) {
-        _error = [NSError errorWithDomain:@"com.weaponx.BatteryManager"
-                                     code:100
-                                 userInfo:@{NSLocalizedDescriptionKey: @"No active profile found"}];
-        PXLog(@"[WeaponX] ⚠️ Error: No active profile when getting identity path in BatteryManager");
-        return nil;
-    }
-    
-    // Use the profile ID to build the path to the identity directory
-    NSString *identityDir = PXProfileDirectoryPath(profileId);
-    
-    // Return the path to the battery_info.plist in this profile
-    return [identityDir stringByAppendingPathComponent:@"battery_info.plist"];
-}
-
-// Load battery values from disk
 - (void)loadBatteryInfoFromDisk {
-    // First try to load from profile-specific plist
-    NSString *profileBatteryPath = [self batteryInfoPathForCurrentProfile];
-    if (profileBatteryPath) {
-        NSDictionary *batteryInfo = [NSDictionary dictionaryWithContentsOfFile:profileBatteryPath];
-        if (batteryInfo && batteryInfo[kBatteryLevelKey]) {
-            _currentBatteryLevel = batteryInfo[kBatteryLevelKey];
-            return;
-        }
-    }
-    
-    // If profile-specific load failed, try global plist
-    NSDictionary *batteryInfo = [NSDictionary dictionaryWithContentsOfFile:BATTERY_PLIST_PATH];
-    if (batteryInfo) {
-        // Extract the values we need
-        _currentBatteryLevel = batteryInfo[kBatteryLevelKey] ?: _currentBatteryLevel;
-    }
+    NSDictionary *batteryInfo = PXCurrentProfileValue(@"batteryInfo");
+    id level = batteryInfo[kBatteryLevelKey];
+    if ([level isKindOfClass:[NSString class]]) _currentBatteryLevel = level;
 }
 
-// Save battery values to disk (both global and profile-specific)
 - (void)saveBatteryInfoToDisk {
-    // Basic validation
-    if (!_currentBatteryLevel) {
-        return;
-    }
-    
-    @try {
-        // First save to the global battery plist
-        NSMutableDictionary *batteryInfo = [NSMutableDictionary dictionary];
-        batteryInfo[kBatteryLevelKey] = _currentBatteryLevel;
-        batteryInfo[kLastUpdatedKey] = [NSDate date];
-        
-        // Create the directory if it doesn't exist
-        NSString *directory = [BATTERY_PLIST_PATH stringByDeletingLastPathComponent];
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        
-        if (![fileManager fileExistsAtPath:directory]) {
-            [fileManager createDirectoryAtPath:directory
-                  withIntermediateDirectories:YES
-                                   attributes:nil
-                                        error:nil];
-        }
-        
-        // Write the plist
-        [batteryInfo writeToFile:BATTERY_PLIST_PATH atomically:YES];
-        
-        PXLog(@"[WeaponX] 🔋 Saved battery info to global plist: %@%%",
-              @([_currentBatteryLevel floatValue] * 100));
-    }
-    @catch (NSException *exception) {
-        // Log the error but don't crash
-        PXLog(@"[WeaponX] ⚠️ Error saving battery info: %@", exception);
-    }
-    
-    // Now also save to the profile-specific plist
-    NSString *batteryInfoPath = [self batteryInfoPathForCurrentProfile];
-    if (batteryInfoPath) {
-        @try {
-            // Create the directory if needed
-            NSString *identityDir = [batteryInfoPath stringByDeletingLastPathComponent];
-            [[NSFileManager defaultManager] createDirectoryAtPath:identityDir
-                                     withIntermediateDirectories:YES
-                                                      attributes:nil
-                                                           error:nil];
-            
-            // Build the path to the battery info plist
-            
-            // Prepare the battery info dictionary
-            NSMutableDictionary *batteryInfo = [NSMutableDictionary dictionary];
-            batteryInfo[kBatteryLevelKey] = _currentBatteryLevel ?: @"0.75";
-            batteryInfo[kLastUpdatedKey] = [NSDate date];
-            
-            // Write to the plist file
-            [batteryInfo writeToFile:batteryInfoPath atomically:YES];
-            
-            // Also update device_ids.plist for the profile if it exists
-            NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-            NSMutableDictionary *deviceIds = [[NSMutableDictionary alloc] initWithContentsOfFile:deviceIdsPath];
-            if (deviceIds) {
-                // Update the battery values in device_ids.plist
-                deviceIds[kBatteryLevelKey] = _currentBatteryLevel;
-                [deviceIds writeToFile:deviceIdsPath atomically:YES];
-            }
-        }
-        @catch (NSException *exception) {
-            PXLog(@"[WeaponX] ⚠️ Error saving profile battery info: %@", exception);
-        }
+    if (!_currentBatteryLevel) return;
+    NSDictionary *batteryInfo = @{
+        kBatteryLevelKey: _currentBatteryLevel,
+        kLastUpdatedKey: [NSDate date]
+    };
+    if (!PXSetCurrentProfileValue(@"batteryInfo", batteryInfo)) {
+        _error = [NSError errorWithDomain:@"com.weaponx.BatteryManager" code:100
+            userInfo:@{NSLocalizedDescriptionKey: @"Current Profile battery value could not be saved"}];
     }
 }
 

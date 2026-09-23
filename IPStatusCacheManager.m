@@ -45,7 +45,7 @@ static NSString *getIPLocationTimePlistPath() {
         }
 
         // Try to load from the plist file
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:kIPStatusPlistPath];
+        NSDictionary *plistDict = PXProfileReadDictionary(kIPStatusPlistPath);
         if (plistDict && plistDict[kIPStatusCacheKey]) {
             self.cacheArray = [plistDict[kIPStatusCacheKey] mutableCopy];
             NSLog(@"[IPStatusCache] Successfully loaded cache from plist file at %@", kIPStatusPlistPath);
@@ -221,13 +221,13 @@ static NSString *getIPLocationTimePlistPath() {
     }
     
     // Get existing data if available
-    NSMutableDictionary *existingData = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath] ?: [NSMutableDictionary dictionary];
+    NSMutableDictionary *existingData = [PXProfileReadDictionary(plistPath) mutableCopy] ?: [NSMutableDictionary dictionary];
     
     // Update with new data
     [existingData addEntriesFromDictionary:data];
     
     // Save back to plist
-    BOOL success = [existingData writeToFile:plistPath atomically:YES];
+    BOOL success = PXProfileWriteDictionary(existingData, plistPath);
     if (success) {
         PXLog(@"[WeaponX] ✅ Successfully saved IP and location data to %@", plistPath);
     } else {
@@ -237,7 +237,7 @@ static NSString *getIPLocationTimePlistPath() {
 
 + (NSDictionary *)loadIPAndLocationData {
     NSString *plistPath = getIPLocationTimePlistPath();
-    NSDictionary *data = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+    NSDictionary *data = PXProfileReadDictionary(plistPath);
     
     if (data) {
         PXLog(@"[WeaponX] ✅ Successfully loaded IP and location data from %@", plistPath);

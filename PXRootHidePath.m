@@ -3,9 +3,11 @@
 #if !defined(PROJECTX_PATHS_TESTING)
 #import <roothide.h>
 #endif
+#include <sys/file.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 NSString * const PXWeaponXDataLogicalPath = @"/var/mobile/Library/WeaponX";
-NSString * const PXWeaponXProfilesLogicalPath = @"/var/mobile/Library/WeaponX/Profiles";
 NSString * const PXWeaponXPreferencesLogicalPath = @"/var/mobile/Library/Preferences";
 NSString * const PXWeaponXGuardianLogicalPath = @"/Library/WeaponX/Guardian";
 NSString * const PXProjectXApplicationLogicalPath = @"/Applications/ProjectX.app";
@@ -50,25 +52,134 @@ NSString *PXWeaponXDataPath(void) {
     return PXJBRootPath(PXWeaponXDataLogicalPath);
 }
 
-NSString *PXProfilesDirectoryPath(void) {
-    return PXJBRootPath(PXWeaponXProfilesLogicalPath);
+NSString *PXCurrentProfileValuesPath(void) {
+    return @"current-profile";
 }
 
-NSString *PXProfileDirectoryPath(NSString *profileID) {
-    NSCParameterAssert(profileID.length > 0);
-    return [PXProfilesDirectoryPath() stringByAppendingPathComponent:profileID];
-}
-
-NSString *PXProfileIdentityDirectoryPath(NSString *profileID) {
-    return [PXProfileDirectoryPath(profileID) stringByAppendingPathComponent:@"identity"];
+NSString *PXCurrentProfileIdentityValuesPath(void) {
+    return [PXCurrentProfileValuesPath() stringByAppendingPathComponent:@"identity"];
 }
 
 NSString *PXCurrentProfileInfoPath(void) {
-    return [PXProfilesDirectoryPath() stringByAppendingPathComponent:@"current_profile_info.plist"];
+    return [PXWeaponXDataPath() stringByAppendingPathComponent:@"current_profile.plist"];
 }
 
-NSString *PXActiveProfileInfoPath(void) {
-    return [PXWeaponXDataPath() stringByAppendingPathComponent:@"active_profile_info.plist"];
+// Profile projections are dictionaries in current_profile.plist. These path
+// shapes identify a value key; no file is opened under Profiles.
+static NSString *PXProfileKeyForPath(NSString *path) {
+    NSString *standardPath = path.stringByStandardizingPath;
+    NSString *profileRoot = [PXCurrentProfileValuesPath() stringByAppendingString:@"/"];
+    if ([standardPath hasPrefix:profileRoot]) {
+        return [standardPath substringFromIndex:profileRoot.length];
+    }
+    return nil;
+}
+
+static BOOL PXPathIsUnderOldProfilesDirectory(NSString *path) {
+    if (![path containsString:@"/Profiles/"]) return NO;
+#if defined(PROJECTX_PATHS_TESTING)
+    if (!PXTestJBRootConverter) return NO;
+#endif
+    NSString *root = [[PXWeaponXDataPath() stringByAppendingPathComponent:@"Profiles"]
+        stringByAppendingString:@"/"];
+    return [path.stringByStandardizingPath hasPrefix:root];
+}
+
+BOOL PXProfilePathUsesCurrentFile(NSString *path) {
+    if (PXProfileKeyForPath(path)) return YES;
+    if (![path hasSuffix:@"/current_profile.plist"]) return NO;
+#if defined(PROJECTX_PATHS_TESTING)
+    if (!PXTestJBRootConverter) return NO;
+#endif
+    return [path.stringByStandardizingPath isEqualToString:PXCurrentProfileInfoPath().stringByStandardizingPath];
+}
+
+NSDictionary *PXProfileReadContentsAtPath(NSString *profilePath) {
+    @synchronized([NSFileManager class]) {
+        int directory = open(profilePath.stringByDeletingLastPathComponent.fileSystemRepresentation, O_RDONLY);
+        if (directory < 0) return nil;
+        if (flock(directory, LOCK_SH) != 0) {
+            close(directory);
+            return nil;
+        }
+        NSDictionary *profile = [NSDictionary dictionaryWithContentsOfFile:profilePath];
+        flock(directory, LOCK_UN);
+        close(directory);
+        return profile;
+    }
+}
+
+BOOL PXProfileUpdateContentsAtPath(NSString *profilePath, void (^update)(NSMutableDictionary *profile)) {
+    @synchronized([NSFileManager class]) {
+        NSFileManager *files = [NSFileManager defaultManager];
+        NSString *directoryPath = profilePath.stringByDeletingLastPathComponent;
+        if (![files createDirectoryAtPath:directoryPath withIntermediateDirectories:YES
+                              attributes:nil error:nil]) return NO;
+        int directory = open(directoryPath.fileSystemRepresentation, O_RDONLY);
+        if (directory < 0) return NO;
+        if (flock(directory, LOCK_EX) != 0) {
+            close(directory);
+            return NO;
+        }
+        BOOL exists = [files fileExistsAtPath:profilePath];
+        NSDictionary *stored = [NSDictionary dictionaryWithContentsOfFile:profilePath];
+        BOOL valid = !exists || [stored isKindOfClass:[NSDictionary class]];
+        BOOL saved = NO;
+        if (valid) {
+            NSMutableDictionary *profile = [stored mutableCopy] ?:
+                [@{@"ProfileName": @"ProjectX", @"values": @{}} mutableCopy];
+            update(profile);
+            saved = [profile writeToFile:profilePath atomically:NO];
+        }
+        flock(directory, LOCK_UN);
+        close(directory);
+        return saved;
+    }
+}
+
+NSDictionary *PXCurrentProfileValue(NSString *key) {
+    if (key.length == 0) return nil;
+    NSDictionary *profile = PXProfileReadContentsAtPath(PXCurrentProfileInfoPath());
+    id values = profile[@"values"];
+    id value = [values isKindOfClass:[NSDictionary class]] ? values[key] : nil;
+    return [value isKindOfClass:[NSDictionary class]] ? value : nil;
+}
+
+BOOL PXSetCurrentProfileValue(NSString *key, NSDictionary *value) {
+    if (key.length == 0 || ![value isKindOfClass:[NSDictionary class]]) return NO;
+    return PXProfileUpdateContentsAtPath(PXCurrentProfileInfoPath(), ^(NSMutableDictionary *profile) {
+        NSMutableDictionary *values = [profile[@"values"] isKindOfClass:[NSDictionary class]]
+            ? [profile[@"values"] mutableCopy] : [NSMutableDictionary dictionary];
+        values[key] = value;
+        profile[@"values"] = values;
+    });
+}
+
+NSDictionary *PXProfileReadDictionary(NSString *path) {
+    NSString *key = PXProfileKeyForPath(path);
+    if (!key) {
+        if (PXPathIsUnderOldProfilesDirectory(path)) return nil;
+        return PXProfilePathUsesCurrentFile(path)
+            ? PXProfileReadContentsAtPath(path)
+            : [NSDictionary dictionaryWithContentsOfFile:path];
+    }
+    return PXCurrentProfileValue(key);
+}
+
+BOOL PXProfileWriteDictionary(NSDictionary *dictionary, NSString *path) {
+    NSString *key = PXProfileKeyForPath(path);
+    if (!key) {
+        if (PXPathIsUnderOldProfilesDirectory(path)) return NO;
+        if (!PXProfilePathUsesCurrentFile(path)) {
+            return [dictionary writeToFile:path atomically:YES];
+        }
+        return PXProfileUpdateContentsAtPath(path, ^(NSMutableDictionary *profile) {
+            for (NSString *field in @[@"ProfileName", @"Description"]) {
+                if (dictionary[field]) profile[field] = dictionary[field];
+            }
+        });
+    }
+    return PXSetCurrentProfileValue(key, dictionary);
 }
 
 NSString *PXPreferencesDirectoryPath(void) {

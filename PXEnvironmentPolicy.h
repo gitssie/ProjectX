@@ -22,6 +22,8 @@ typedef NS_ENUM(NSInteger, PXEnvironmentModelSelectionMode) {
 
 FOUNDATION_EXPORT NSString *PXEnvironmentNetworkTypeIdentifier(PXEnvironmentNetworkType networkType);
 FOUNDATION_EXPORT PXEnvironmentNetworkType PXEnvironmentNetworkTypeFromIdentifier(NSString * _Nullable identifier);
+FOUNDATION_EXPORT PXEnvironmentNetworkType PXPreferredEnvironmentNetworkType(NSSet<NSNumber *> *networkTypes);
+FOUNDATION_EXPORT NSArray<NSString *> *PXEnvironmentNetworkTypeIdentifiers(NSSet<NSNumber *> *networkTypes);
 FOUNDATION_EXPORT BOOL PXEnvironmentNetworkTypeIsCompatibleWithModelRecord(
     PXEnvironmentNetworkType networkType,
     NSDictionary<NSString *, id> * _Nullable modelRecord
@@ -41,13 +43,14 @@ FOUNDATION_EXPORT BOOL PXEnvironmentAllowsApplicationIdentityEnsure(
 
 @interface PXEnvironmentPolicyStore : NSObject
 
-@property (nonatomic, copy, readonly) NSString *filePath;
+@property (nonatomic, copy, readonly, nullable) NSString *filePath;
 
 + (instancetype)sharedStore;
-- (instancetype)initWithFilePath:(NSString *)filePath;
+- (instancetype)initWithFilePath:(nullable NSString *)filePath;
 - (nullable NSString *)selectedModelIdentifierWithError:(NSError * _Nullable * _Nullable)error;
 - (PXEnvironmentModelSelectionMode)selectedModelSelectionModeWithError:(NSError * _Nullable * _Nullable)error;
 - (PXEnvironmentNetworkType)selectedNetworkTypeWithError:(NSError * _Nullable * _Nullable)error;
+- (nullable NSSet<NSNumber *> *)selectedNetworkTypesWithError:(NSError * _Nullable * _Nullable)error;
 - (nullable NSDictionary<NSString *, id> *)configuredLocationWithError:(NSError * _Nullable * _Nullable)error;
 - (BOOL)locationWasExplicitlyClearedWithError:(NSError * _Nullable * _Nullable)error;
 - (BOOL)hasPendingChangesWithError:(NSError * _Nullable * _Nullable)error;
@@ -63,6 +66,9 @@ FOUNDATION_EXPORT BOOL PXEnvironmentAllowsApplicationIdentityEnsure(
 - (BOOL)saveSelectedNetworkType:(PXEnvironmentNetworkType)networkType
                      modelRecord:(NSDictionary<NSString *, id> * _Nullable)modelRecord
                            error:(NSError * _Nullable * _Nullable)error;
+- (BOOL)saveSelectedNetworkTypes:(NSSet<NSNumber *> *)networkTypes
+                      modelRecord:(NSDictionary<NSString *, id> * _Nullable)modelRecord
+                            error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)saveConfiguredLocation:(NSDictionary<NSString *, id> *)location
                           error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)clearConfiguredLocationWithError:(NSError * _Nullable * _Nullable)error;

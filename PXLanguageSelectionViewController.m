@@ -3,11 +3,24 @@
 
 #import "PXLocalizedStrings.h"
 
+@interface PXLanguageSelectionViewController ()
+@property (nonatomic, assign) PXUILanguagePreference selectedPreference;
+@property (nonatomic, assign) PXUILanguagePreference originalPreference;
+@end
+
 @implementation PXLanguageSelectionViewController
 
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = PXLocalizedString(@"language.title");
+    self.originalPreference = PXCurrentUILanguagePreference();
+    self.selectedPreference = self.originalPreference;
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
+        initWithTitle:PXLocalizedString(@"image.network.confirm.title")
+                style:UIBarButtonItemStyleDone
+               target:self
+               action:@selector(handleConfirmTapped:)];
+    [self updateConfirmButtonState];
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     self.view.backgroundColor = UIColor.systemGroupedBackgroundColor;
     self.tableView.backgroundColor = UIColor.systemGroupedBackgroundColor;
@@ -26,11 +39,22 @@
 - (void)handleLanguagePreferenceChanged:(NSNotification *)notification {
     (void)notification;
     self.title = PXLocalizedString(@"language.title");
+    self.navigationItem.rightBarButtonItem.title = PXLocalizedString(@"image.network.confirm.title");
     self.tableView.accessibilityLabel = PXLocalizedString(@"language.accessibility.list");
     [self.tableView reloadData];
     if (self.view.window) {
         UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, self.tableView);
     }
+}
+
+- (void)updateConfirmButtonState {
+    self.navigationItem.rightBarButtonItem.enabled = self.selectedPreference != self.originalPreference;
+}
+
+- (void)handleConfirmTapped:(UIBarButtonItem *)sender {
+    if (!sender.enabled) return;
+    PXSetUILanguagePreference(self.selectedPreference);
+    [self.navigationController popViewControllerAnimated:YES];
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView { return 1; }
@@ -47,7 +71,7 @@
         cell.detailTextLabel.numberOfLines = 2;
     }
     PXUILanguagePreference option = (PXUILanguagePreference)indexPath.row;
-    BOOL isSelected = PXCurrentUILanguagePreference() == option;
+    BOOL isSelected = self.selectedPreference == option;
     UIListContentConfiguration *content = [UIListContentConfiguration subtitleCellConfiguration];
     content.text = PXLocalizedString(PXUILanguagePreferenceTitleKey(option));
     content.secondaryText = PXLocalizedString(PXUILanguagePreferenceDetailKey(option));
@@ -67,8 +91,9 @@
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    PXSetUILanguagePreference((PXUILanguagePreference)indexPath.row);
-    UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, PXLocalizedString(@"language.changed_announcement"));
+    self.selectedPreference = (PXUILanguagePreference)indexPath.row;
+    [self updateConfirmButtonState];
+    [self.tableView reloadData];
 }
 
 @end

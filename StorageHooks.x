@@ -105,7 +105,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Load the plist file safely
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
+        NSDictionary *plistDict = PXProfileReadDictionary(validPath);
         if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
             scopedAppsCacheTimestamp = [NSDate date];
             return scopedAppsCache;
@@ -172,18 +172,8 @@ static NSDictionary *getStorageValues() {
     }
     
     @try {
-        // First try to get active profile ID
-        NSString *profilesPath = PXCurrentProfileInfoPath();
-        NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
-        NSString *profileId = currentProfileInfo[@"ProfileId"];
-        
-        if (profileId) {
-            // Build path to storage.plist for this profile
-            NSString *profileDir = PXProfileDirectoryPath(profileId);
-            NSString *storagePath = [profileDir stringByAppendingPathComponent:@"storage.plist"];
-            
-            // Try to load values from storage.plist
-            NSDictionary *storageDict = [NSDictionary dictionaryWithContentsOfFile:storagePath];
+        {
+            NSDictionary *storageDict = PXCurrentProfileValue(@"storage");
             if (storageDict && storageDict[@"TotalStorage"] && storageDict[@"FreeStorage"]) {
                 cachedStorageValues = [storageDict copy];
                 lastLoadTime = now;

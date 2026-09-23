@@ -43,7 +43,7 @@ Project-local untracked config:
   Copy scripts/deploy.env.example there, fill it once, and chmod it 600.
 
 Required config keys for deploy/start/verify/status:
-  PROJECTX_SILEO_SOURCE_URL      Stable URL, exactly http://127.0.0.1:<device-port>/.
+  PROJECTX_SILEO_SOURCE_URL      Stable URL, exactly http://127.0.0.1:<device-port>.
   PROJECTX_SILEO_HTTP_PORT       Mac loopback HTTP port.
   PROJECTX_SILEO_DEVICE_PORT     Device loopback reverse-forward port.
   PROJECTX_SILEO_SSH_HOST        Existing iproxy SSH host.
@@ -233,6 +233,7 @@ load_config_file
 
 state_dir="$deploy_root/state"
 source_url=${PROJECTX_SILEO_SOURCE_URL:-}
+source_url=${source_url%/}
 http_port=${PROJECTX_SILEO_HTTP_PORT:-}
 device_port=${PROJECTX_SILEO_DEVICE_PORT:-}
 ssh_host=${PROJECTX_SILEO_SSH_HOST:-}
@@ -342,9 +343,9 @@ validate_connection_values() {
     [ -f "$ssh_identity" ] && [ -r "$ssh_identity" ] ||
         fail "PROJECTX_SILEO_SSH_IDENTITY is not a readable file"
 
-    expected_source_url="http://127.0.0.1:$device_port/"
+    expected_source_url="http://127.0.0.1:$device_port"
     [ "$source_url" = "$expected_source_url" ] ||
-        fail "PROJECTX_SILEO_SOURCE_URL must equal http://127.0.0.1:<PROJECTX_SILEO_DEVICE_PORT>/"
+        fail "PROJECTX_SILEO_SOURCE_URL must equal http://127.0.0.1:<PROJECTX_SILEO_DEVICE_PORT>"
 }
 
 validate_connection_configuration() {

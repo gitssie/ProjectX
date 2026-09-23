@@ -3,7 +3,6 @@
 NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSString * const PXWeaponXDataLogicalPath;
-FOUNDATION_EXPORT NSString * const PXWeaponXProfilesLogicalPath;
 FOUNDATION_EXPORT NSString * const PXWeaponXPreferencesLogicalPath;
 FOUNDATION_EXPORT NSString * const PXWeaponXGuardianLogicalPath;
 FOUNDATION_EXPORT NSString * const PXProjectXApplicationLogicalPath;
@@ -11,11 +10,16 @@ FOUNDATION_EXPORT NSString * const PXProjectXApplicationLogicalPath;
 FOUNDATION_EXPORT NSString *PXJBRootPath(NSString *logicalPath);
 FOUNDATION_EXPORT NSString *PXRootFSPath(NSString *rootFSPath);
 FOUNDATION_EXPORT NSString *PXWeaponXDataPath(void);
-FOUNDATION_EXPORT NSString *PXProfilesDirectoryPath(void);
-FOUNDATION_EXPORT NSString *PXProfileDirectoryPath(NSString *profileID);
-FOUNDATION_EXPORT NSString *PXProfileIdentityDirectoryPath(NSString *profileID);
+FOUNDATION_EXPORT NSString *PXCurrentProfileValuesPath(void);
+FOUNDATION_EXPORT NSString *PXCurrentProfileIdentityValuesPath(void);
 FOUNDATION_EXPORT NSString *PXCurrentProfileInfoPath(void);
-FOUNDATION_EXPORT NSString *PXActiveProfileInfoPath(void);
+FOUNDATION_EXPORT NSDictionary * _Nullable PXProfileReadContentsAtPath(NSString *profilePath);
+FOUNDATION_EXPORT BOOL PXProfileUpdateContentsAtPath(NSString *profilePath, void (^update)(NSMutableDictionary *profile));
+FOUNDATION_EXPORT NSDictionary * _Nullable PXCurrentProfileValue(NSString *key);
+FOUNDATION_EXPORT BOOL PXSetCurrentProfileValue(NSString *key, NSDictionary *value);
+FOUNDATION_EXPORT BOOL PXProfilePathUsesCurrentFile(NSString *path);
+FOUNDATION_EXPORT NSDictionary * _Nullable PXProfileReadDictionary(NSString *path);
+FOUNDATION_EXPORT BOOL PXProfileWriteDictionary(NSDictionary *dictionary, NSString *path);
 FOUNDATION_EXPORT NSString *PXPreferencesDirectoryPath(void);
 FOUNDATION_EXPORT NSString *PXPreferencesFilePath(NSString *fileName);
 FOUNDATION_EXPORT NSString *PXGlobalScopePreferencesPath(void);

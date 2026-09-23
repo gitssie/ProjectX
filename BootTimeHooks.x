@@ -1,6 +1,5 @@
 #import "ProjectX.h"
 #import "UptimeManager.h"
-#import "ProfileManager.h"
 #import "ProjectXLogging.h"
 #import "PXRootHidePath.h"
 #import "PXProcessHookPolicy.h"
@@ -111,7 +110,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Load the plist file safely
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
+        NSDictionary *plistDict = PXProfileReadDictionary(validPath);
         if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
             scopedAppsCacheTimestamp = [NSDate date];
             return scopedAppsCache;
@@ -159,15 +158,7 @@ static BOOL shouldSpoofBootTimeForApp(void) {
 // Get the current profile path for spoofed values
 static NSString *getCurrentProfilePath(void) {
     @try {
-        ProfileManager *profileManager = [ProfileManager sharedManager];
-        if (!profileManager) return nil;
-        
-        Profile *currentProfile = [profileManager currentProfile];
-        if (!currentProfile) return nil;
-        
-        // Use the hardcoded profiles directory path since profilesDirectory is private
-        NSString *profilesDir = PXProfilesDirectoryPath();
-        return [profilesDir stringByAppendingPathComponent:currentProfile.profileId];
+        return PXCurrentProfileInfoPath();
     } @catch (NSException *e) {
         return nil;
     }
@@ -198,14 +189,8 @@ static void updateCachedBootTimeValues(void) {
         if (!uptimeManager) return;
         
         // Get spoofed boot time and uptime
-        NSDate *bootTime = [uptimeManager currentBootTimeForProfile:profilePath];
-        NSTimeInterval uptime = [uptimeManager currentUptimeForProfile:profilePath];
-        
-        if (!bootTime || uptime <= 0) {
-            [uptimeManager generateConsistentUptimeAndBootTimeForProfile:profilePath];
-            bootTime = [uptimeManager currentBootTimeForProfile:profilePath];
-            uptime = [uptimeManager currentUptimeForProfile:profilePath];
-        }
+        NSDate *bootTime = [uptimeManager currentBootTime];
+        NSTimeInterval uptime = [uptimeManager currentUptime];
         
         // Validate the data before caching
         if (bootTime && uptime > 0) {

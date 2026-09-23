@@ -328,8 +328,48 @@ BOOL PXNetworkIdentityIsCoherent(NSDictionary<NSString *, id> *identity) {
     NSString *radioTechnology = [identity[@"radioTechnology"] isKindOfClass:NSString.class]
         ? identity[@"radioTechnology"]
         : nil;
+    id configuredTypesValue = identity[@"configuredNetworkTypes"];
+    if (configuredTypesValue) {
+        if (![configuredTypesValue isKindOfClass:NSArray.class] ||
+            [(NSArray *)configuredTypesValue count] == 0) {
+            return NO;
+        }
+        NSSet<NSString *> *knownTypes = [NSSet setWithArray:@[
+            @"wifi", @"5g-nr", @"4g-lte", @"3g", @"2g", @"none"
+        ]];
+        NSMutableSet<NSString *> *configuredTypes = [NSMutableSet set];
+        for (id type in configuredTypesValue) {
+            if (![type isKindOfClass:NSString.class] || ![knownTypes containsObject:type] ||
+                [configuredTypes containsObject:type]) {
+                return NO;
+            }
+            [configuredTypes addObject:type];
+        }
+        if (![configuredTypes containsObject:networkType] ||
+            (configuredTypes.count > 1 && [configuredTypes containsObject:@"none"])) {
+            return NO;
+        }
+        NSMutableSet<NSString *> *allowedRadios = [NSMutableSet set];
+        if ([configuredTypes containsObject:@"5g-nr"]) {
+            [allowedRadios addObject:@"CTRadioAccessTechnologyNR"];
+            [allowedRadios addObject:@"CTRadioAccessTechnologyNRNSA"];
+        }
+        if ([configuredTypes containsObject:@"4g-lte"]) {
+            [allowedRadios addObject:@"CTRadioAccessTechnologyLTE"];
+        }
+        if ([configuredTypes containsObject:@"3g"]) {
+            [allowedRadios addObject:@"CTRadioAccessTechnologyWCDMA"];
+        }
+        if ([configuredTypes containsObject:@"2g"]) {
+            [allowedRadios addObject:@"CTRadioAccessTechnologyEdge"];
+        }
+        if (allowedRadios.count > 0 && ![allowedRadios containsObject:radioTechnology]) {
+            return NO;
+        }
+    }
     NSDictionary<NSString *, NSDictionary<NSString *, NSString *> *> *requirements = @{
         @"5g": @{@"transport": @"cellular"},
+        @"5g-nr": @{@"transport": @"cellular"},
         @"4g-lte": @{@"transport": @"cellular", @"radioTechnology": @"CTRadioAccessTechnologyLTE"},
         @"3g": @{@"transport": @"cellular", @"radioTechnology": @"CTRadioAccessTechnologyWCDMA"},
         @"2g": @{@"transport": @"cellular", @"radioTechnology": @"CTRadioAccessTechnologyEdge"},
@@ -347,7 +387,7 @@ BOOL PXNetworkIdentityIsCoherent(NSDictionary<NSString *, id> *identity) {
     if (requiredRadioTechnology && ![radioTechnology isEqualToString:requiredRadioTechnology]) {
         return NO;
     }
-    if ([networkType isEqualToString:@"5g"] &&
+    if (([networkType isEqualToString:@"5g"] || [networkType isEqualToString:@"5g-nr"]) &&
         ![@[@"CTRadioAccessTechnologyNR", @"CTRadioAccessTechnologyNRNSA"]
             containsObject:radioTechnology]) {
         return NO;

@@ -2,27 +2,18 @@
 
 @interface ContainerManager : NSObject
 
-@property (nonatomic, readonly, strong) NSString *currentProfileID;
 
 // Shared manager accessor
 + (instancetype)sharedManager;
 + (instancetype)sharedInstance;
 
 // Path Translation
-- (NSString *)translatePath:(NSString *)originalPath forApp:(NSString *)bundleID inProfile:(NSString *)profileID;
+- (NSString *)translatePath:(NSString *)originalPath forApp:(NSString *)bundleID;
 - (BOOL)isPathRedirectable:(NSString *)path forApp:(NSString *)bundleID;
 
 // Directory Structure
-- (NSString *)profileBasePath:(NSString *)profileID;
-- (NSString *)appBasePath:(NSString *)profileID bundleID:(NSString *)bundleID;
-- (NSString *)appDataPath:(NSString *)bundleID inProfile:(NSString *)profileID;
-
-// Profile Integration
-- (void)profileDidChange:(NSString *)newProfileID;
-- (BOOL)prepareProfileDirectory:(NSString *)profileID;
-
-// Gets the current profile ID
-- (NSString *)currentProfileID;
+- (NSString *)appDataPath:(NSString *)bundleID;
+- (BOOL)prepareAppDataDirectory;
 
 // Translates a real iOS filesystem path into the RootHide bootstrap namespace.
 + (NSString *)translatePathForEnvironment:(NSString *)path;

@@ -40,49 +40,24 @@ else
   echo "ERROR: WeaponXDaemon executable not found at ${DAEMON_DIR}/WeaponXDaemon"
 fi
 
-# Create Profiles directory
+# Discard the obsolete multi-Profile storage.
 PROFILES_DIR="${WEAPONX_DIR}/Profiles"
-mkdir -p "$PROFILES_DIR"
-chmod 755 "$PROFILES_DIR"
-chown mobile:mobile "$PROFILES_DIR"
+rm -rf "$PROFILES_DIR"
+rm -f "${WEAPONX_DIR}/active_profile_info.plist"
+rm -f "${PREFS_DIR}/com.hydra.projectx.pending-environment.plist"
 
-# Create a default profile if none exists
-if [ ! -d "${PROFILES_DIR}/1" ]; then
-  mkdir -p "${PROFILES_DIR}/1"
-  chmod 755 "${PROFILES_DIR}/1"
-  chown mobile:mobile "${PROFILES_DIR}/1"
-  
-  # Create directories within the profile
-  mkdir -p "${PROFILES_DIR}/1/appdata"
-  chmod 755 "${PROFILES_DIR}/1/appdata"
-  chown mobile:mobile "${PROFILES_DIR}/1/appdata"
-  
-  mkdir -p "${PROFILES_DIR}/1/identity"
-  chmod 755 "${PROFILES_DIR}/1/identity"
-  chown mobile:mobile "${PROFILES_DIR}/1/identity"
-  
-  # Create profile info file
-  echo '{
-    "ProfileName": "Default",
-    "Description": "Default Profile",
-    "CreationDate": "'$(date "+%Y-%m-%d %H:%M:%S")'"
-  }' > "${PROFILES_DIR}/1/profile_info.plist"
-  chmod 644 "${PROFILES_DIR}/1/profile_info.plist"
-  chown mobile:mobile "${PROFILES_DIR}/1/profile_info.plist"
-  
-  # Create active profile info file
-  echo '{
-    "ProfileId": "1"
-  }' > "${WEAPONX_DIR}/active_profile_info.plist"
-  chmod 644 "${WEAPONX_DIR}/active_profile_info.plist"
-  chown mobile:mobile "${WEAPONX_DIR}/active_profile_info.plist"
-  
-  # Create current profile info file
-  echo '{
-    "ProfileId": "1"
-  }' > "${PROFILES_DIR}/current_profile_info.plist"
-  chmod 644 "${PROFILES_DIR}/current_profile_info.plist"
-  chown mobile:mobile "${PROFILES_DIR}/current_profile_info.plist"
+CURRENT_PROFILE="${WEAPONX_DIR}/current_profile.plist"
+if [ ! -f "$CURRENT_PROFILE" ]; then
+  cat > "$CURRENT_PROFILE" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>ProfileName</key><string>ProjectX</string>
+  <key>values</key><dict/>
+</dict></plist>
+PLIST
+  chmod 644 "$CURRENT_PROFILE"
+  chown mobile:mobile "$CURRENT_PROFILE"
 fi
 
 # Create global scope plist with Lyft enabled by default

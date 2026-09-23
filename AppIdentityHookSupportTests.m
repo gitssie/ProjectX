@@ -90,9 +90,10 @@ static PXProfileGenerationInput *vendorGenerationInput(NSData *seed) {
 
 static void testProductionVendorSeamReloadsAfterPromotionWithoutNotification(void) {
     NSString *bundleIdentifier = @"com.fingerprintjs.DemoApp";
-    NSString *identityDirectory = [NSTemporaryDirectory()
+    NSString *testRoot = [NSTemporaryDirectory()
         stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
-    assert([[NSFileManager defaultManager] createDirectoryAtPath:identityDirectory
+    NSString *identityDirectory = [testRoot stringByAppendingPathComponent:@"test/data/identity"];
+    assert([[NSFileManager defaultManager] createDirectoryAtPath:testRoot
                                       withIntermediateDirectories:YES
                                                        attributes:nil
                                                             error:nil]);
@@ -130,12 +131,12 @@ static void testProductionVendorSeamReloadsAfterPromotionWithoutNotification(voi
     assert(PXNetworkIdentityIsCoherent(secondNetworkIdentity));
     assert(![firstNetworkIdentity isEqualToDictionary:secondNetworkIdentity]);
 
-    NSString *activeLink = [identityDirectory stringByAppendingPathComponent:@"profile_active"];
-    assert([[NSFileManager defaultManager] removeItemAtPath:activeLink error:nil]);
+    NSString *profilePath = [testRoot stringByAppendingPathComponent:@"current_profile.plist"];
+    assert([[NSFileManager defaultManager] removeItemAtPath:profilePath error:nil]);
     assert(PXPrepareScopedVendorIdentifier(bundleIdentifier, identityDirectory) == nil);
     assert(PXPrepareScopedNetworkIdentity(bundleIdentifier, identityDirectory) == nil);
 
-    [[NSFileManager defaultManager] removeItemAtPath:identityDirectory error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:testRoot error:nil];
 }
 
 int main(void) {

@@ -9,7 +9,7 @@
 #include <unistd.h>
 
 NSString *const PXKeychainCommandErrorDomain = @"com.hydra.projectx.keychain-command";
-const NSInteger PXKeychainCommandSchemaVersion = 1;
+const NSInteger PXKeychainCommandSchemaVersion = 2;
 const int32_t PXKeychainStatusSuccess = 0;
 const int32_t PXKeychainStatusItemNotFound = -25300;
 NSString *const PXKeychainCommandRequestNotification = @"com.hydra.projectx.keychain.request";
@@ -52,18 +52,6 @@ static BOOL PXKeychainCommandIsUUID(NSString *value) {
         [[NSUUID alloc] initWithUUIDString:value] != nil;
 }
 
-BOOL PXKeychainCommandProfileIdentifierIsValid(NSString *profileIdentifier) {
-    if (![profileIdentifier isKindOfClass:[NSString class]] ||
-        profileIdentifier.length == 0 || profileIdentifier.length > 128 ||
-        [profileIdentifier hasPrefix:@"."]) {
-        return NO;
-    }
-    NSCharacterSet *invalidCharacters = [[NSCharacterSet
-        characterSetWithCharactersInString:
-            @"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"] invertedSet];
-    return [profileIdentifier rangeOfCharacterFromSet:invalidCharacters].location == NSNotFound;
-}
-
 static BOOL PXKeychainStatusAllowsEmptyResult(int32_t status, NSUInteger count) {
     return status == PXKeychainStatusItemNotFound ||
         (status == PXKeychainStatusSuccess && count == 0);
@@ -73,7 +61,6 @@ static BOOL PXKeychainStatusAllowsEmptyResult(int32_t status, NSUInteger count) 
 
 @property (nonatomic, copy, readwrite) NSString *requestID;
 @property (nonatomic, copy, readwrite) NSString *targetBundleID;
-@property (nonatomic, copy, readwrite) NSString *profileID;
 @property (nonatomic, copy, readwrite) NSString *generationID;
 @property (nonatomic, copy, readwrite) NSString *operation;
 @property (nonatomic, strong, readwrite) NSDate *createdAt;
@@ -88,7 +75,7 @@ static BOOL PXKeychainStatusAllowsEmptyResult(int32_t status, NSUInteger count) 
 + (instancetype)requestWithPropertyList:(NSDictionary<NSString *, id> *)propertyList
                                    error:(NSError * _Nullable * _Nullable)error {
     NSSet<NSString *> *allowedKeys = [NSSet setWithArray:@[
-        @"schemaVersion", @"requestID", @"targetBundleID", @"profileID",
+        @"schemaVersion", @"requestID", @"targetBundleID",
         @"generationID", @"operation", @"createdAt", @"expiresAt",
         @"synchronizablePolicy", @"includeSharedAccessGroups"
     ]];
@@ -100,7 +87,6 @@ static BOOL PXKeychainStatusAllowsEmptyResult(int32_t status, NSUInteger count) 
     }
     NSString *requestID = propertyList[@"requestID"];
     NSString *targetBundleID = propertyList[@"targetBundleID"];
-    NSString *profileID = propertyList[@"profileID"];
     NSString *generationID = propertyList[@"generationID"];
     NSString *operation = propertyList[@"operation"];
     NSString *synchronizablePolicy = propertyList[@"synchronizablePolicy"];
@@ -109,7 +95,6 @@ static BOOL PXKeychainStatusAllowsEmptyResult(int32_t status, NSUInteger count) 
     NSNumber *includeSharedAccessGroups = propertyList[@"includeSharedAccessGroups"];
     if ([propertyList[@"schemaVersion"] integerValue] != PXKeychainCommandSchemaVersion ||
         !PXKeychainCommandIsUUID(requestID) ||
-        !PXKeychainCommandProfileIdentifierIsValid(profileID) ||
         !PXKeychainCommandIsUUID(generationID) || targetBundleID.length == 0 ||
         ![operation isEqualToString:@"clear-keychain"] ||
         !([synchronizablePolicy isEqualToString:@"exclude"] ||
@@ -123,7 +108,6 @@ static BOOL PXKeychainStatusAllowsEmptyResult(int32_t status, NSUInteger count) 
     PXKeychainCommandRequest *request = [[self alloc] init];
     request.requestID = requestID.lowercaseString;
     request.targetBundleID = targetBundleID;
-    request.profileID = profileID.lowercaseString;
     request.generationID = generationID.lowercaseString;
     request.operation = operation;
     request.createdAt = createdAt;
@@ -134,7 +118,6 @@ static BOOL PXKeychainStatusAllowsEmptyResult(int32_t status, NSUInteger count) 
 }
 
 + (instancetype)freshRequestForBundleIdentifier:(NSString *)bundleIdentifier
-                                        profileID:(NSString *)profileID
                                      generationID:(NSString *)generationID
                        includeSharedAccessGroups:(BOOL)includeSharedAccessGroups
                        includeSynchronizableItems:(BOOL)includeSynchronizableItems
@@ -150,7 +133,6 @@ static BOOL PXKeychainStatusAllowsEmptyResult(int32_t status, NSUInteger count) 
         @"schemaVersion": @(PXKeychainCommandSchemaVersion),
         @"requestID": NSUUID.UUID.UUIDString.lowercaseString,
         @"targetBundleID": bundleIdentifier ?: @"",
-        @"profileID": profileID ?: @"",
         @"generationID": generationID ?: @"",
         @"operation": @"clear-keychain",
         @"createdAt": now,
@@ -165,7 +147,6 @@ static BOOL PXKeychainStatusAllowsEmptyResult(int32_t status, NSUInteger count) 
         @"schemaVersion": @(PXKeychainCommandSchemaVersion),
         @"requestID": self.requestID,
         @"targetBundleID": self.targetBundleID,
-        @"profileID": self.profileID,
         @"generationID": self.generationID,
         @"operation": self.operation,
         @"createdAt": self.createdAt,
@@ -337,14 +318,12 @@ static NSString *PXKeychainApplicationIdentifier(NSString *bundleIdentifier,
 @implementation PXKeychainCommandContext
 
 - (instancetype)initWithBundleIdentifier:(NSString *)bundleIdentifier
-                                profileID:(NSString *)profileID
                              generationID:(NSString *)generationID
                        applicationEnabled:(BOOL)applicationEnabled
                          extensionEnabled:(BOOL)extensionEnabled {
     self = [super init];
     if (self) {
         _bundleIdentifier = [bundleIdentifier copy];
-        _profileID = [profileID copy];
         _generationID = [generationID copy];
         _applicationEnabled = applicationEnabled;
         _extensionEnabled = extensionEnabled;
@@ -376,7 +355,6 @@ static NSString *PXKeychainApplicationIdentifier(NSString *bundleIdentifier,
                error:(NSError * _Nullable * _Nullable)error {
     if (!request || !context || !now ||
         ![request.targetBundleID isEqualToString:context.bundleIdentifier] ||
-        [request.profileID caseInsensitiveCompare:context.profileID] != NSOrderedSame ||
         [request.generationID caseInsensitiveCompare:context.generationID] != NSOrderedSame ||
         !PXAppIdentityBundleIsEligible(context.bundleIdentifier,
                                        context.isApplicationEnabled,
@@ -768,7 +746,6 @@ static NSString *PXKeychainApplicationIdentifier(NSString *bundleIdentifier,
                     return;
                 }
                 [self.transport waitForReadyBundleIdentifier:request.targetBundleID
-                                                   profileID:request.profileID
                                                 generationID:request.generationID
                                                      timeout:self.readyTimeout
                                                   completion:^(BOOL ready, NSError *readyError) {
@@ -1000,7 +977,7 @@ static BOOL PXKeychainCommandIsSafeBundleIdentifier(NSString *bundleIdentifier) 
             !S_ISREG(requestInfo.st_mode) || S_ISLNK(requestInfo.st_mode)) {
             continue;
         }
-        NSDictionary<NSString *, id> *propertyList = [NSDictionary dictionaryWithContentsOfFile:path];
+        NSDictionary<NSString *, id> *propertyList = PXProfileReadDictionary(path);
         PXKeychainCommandRequest *request = [PXKeychainCommandRequest
             requestWithPropertyList:propertyList
             error:nil];
@@ -1036,7 +1013,7 @@ static BOOL PXKeychainCommandIsSafeBundleIdentifier(NSString *bundleIdentifier) 
             !S_ISREG(requestInfo.st_mode) || S_ISLNK(requestInfo.st_mode)) {
             continue;
         }
-        NSDictionary<NSString *, id> *propertyList = [NSDictionary dictionaryWithContentsOfFile:path];
+        NSDictionary<NSString *, id> *propertyList = PXProfileReadDictionary(path);
         if ([PXKeychainCommandRequest requestWithPropertyList:propertyList error:nil]) {
             continue;
         }
@@ -1112,7 +1089,7 @@ static BOOL PXKeychainCommandIsSafeBundleIdentifier(NSString *bundleIdentifier) 
         return NO;
     }
     NSString *claimPath = [[self directoryPath:@"claims"] stringByAppendingPathComponent:leafName];
-    NSDictionary<NSString *, id> *claim = [NSDictionary dictionaryWithContentsOfFile:claimPath];
+    NSDictionary<NSString *, id> *claim = PXProfileReadDictionary(claimPath);
     return [claim[@"schemaVersion"] integerValue] == PXKeychainCommandSchemaVersion &&
         [claim[@"requestID"] isEqualToString:requestID.lowercaseString] &&
         [claim[@"completed"] boolValue];
@@ -1143,7 +1120,7 @@ static BOOL PXKeychainCommandIsSafeBundleIdentifier(NSString *bundleIdentifier) 
         !S_ISREG(responseInfo.st_mode) || S_ISLNK(responseInfo.st_mode)) {
         return nil;
     }
-    NSDictionary<NSString *, id> *propertyList = [NSDictionary dictionaryWithContentsOfFile:path];
+    NSDictionary<NSString *, id> *propertyList = PXProfileReadDictionary(path);
     if (!propertyList) {
         return nil;
     }
@@ -1154,27 +1131,23 @@ static BOOL PXKeychainCommandIsSafeBundleIdentifier(NSString *bundleIdentifier) 
 }
 
 - (BOOL)writeReadinessForBundleIdentifier:(NSString *)bundleIdentifier
-                                 profileID:(NSString *)profileID
                               generationID:(NSString *)generationID
                                        now:(NSDate *)now
                                      error:(NSError * _Nullable * _Nullable)error {
     NSString *leafName = [self readinessLeafName:bundleIdentifier];
-    if (!leafName || !PXKeychainCommandIsUUID(profileID) ||
-        !PXKeychainCommandIsUUID(generationID) || !now) {
+    if (!leafName || !PXKeychainCommandIsUUID(generationID) || !now) {
         return [self failFileOperation:error code:PXKeychainCommandErrorInvalidRequest
                                 reason:@"Readiness context is invalid"];
     }
     return [self writePropertyList:@{
         @"schemaVersion": @(PXKeychainCommandSchemaVersion),
         @"bundleIdentifier": bundleIdentifier,
-        @"profileID": profileID.lowercaseString,
         @"generationID": generationID.lowercaseString,
         @"readyAt": now
     } directory:@"readiness" leafName:leafName error:error];
 }
 
 - (BOOL)isReadyBundleIdentifier:(NSString *)bundleIdentifier
-                      profileID:(NSString *)profileID
                    generationID:(NSString *)generationID
                             now:(NSDate *)now
                     maximumAge:(NSTimeInterval)maximumAge {
@@ -1188,12 +1161,11 @@ static BOOL PXKeychainCommandIsSafeBundleIdentifier(NSString *bundleIdentifier) 
         !S_ISREG(readinessInfo.st_mode) || S_ISLNK(readinessInfo.st_mode)) {
         return NO;
     }
-    NSDictionary<NSString *, id> *readiness = [NSDictionary dictionaryWithContentsOfFile:path];
+    NSDictionary<NSString *, id> *readiness = PXProfileReadDictionary(path);
     NSDate *readyAt = readiness[@"readyAt"];
     NSTimeInterval age = [readyAt isKindOfClass:[NSDate class]] ? [now timeIntervalSinceDate:readyAt] : -1;
     return [readiness[@"schemaVersion"] integerValue] == PXKeychainCommandSchemaVersion &&
         [readiness[@"bundleIdentifier"] isEqualToString:bundleIdentifier] &&
-        [readiness[@"profileID"] caseInsensitiveCompare:profileID] == NSOrderedSame &&
         [readiness[@"generationID"] caseInsensitiveCompare:generationID] == NSOrderedSame &&
         age >= 0 && age <= maximumAge;
 }
@@ -1239,12 +1211,10 @@ static BOOL PXKeychainCommandIsSafeBundleIdentifier(NSString *bundleIdentifier) 
 }
 
 - (void)pollReadinessForBundleIdentifier:(NSString *)bundleIdentifier
-                                profileID:(NSString *)profileID
                              generationID:(NSString *)generationID
                                  deadline:(NSDate *)deadline
                                completion:(void (^)(BOOL, NSError *))completion {
     if ([self.fileStore isReadyBundleIdentifier:bundleIdentifier
-                                      profileID:profileID
                                    generationID:generationID
                                             now:[NSDate date]
                                     maximumAge:60]) {
@@ -1258,7 +1228,6 @@ static BOOL PXKeychainCommandIsSafeBundleIdentifier(NSString *bundleIdentifier) 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC),
                    self.pollingQueue, ^{
         [self pollReadinessForBundleIdentifier:bundleIdentifier
-                                     profileID:profileID
                                   generationID:generationID
                                       deadline:deadline
                                     completion:completion];
@@ -1266,7 +1235,6 @@ static BOOL PXKeychainCommandIsSafeBundleIdentifier(NSString *bundleIdentifier) 
 }
 
 - (void)waitForReadyBundleIdentifier:(NSString *)bundleIdentifier
-                            profileID:(NSString *)profileID
                          generationID:(NSString *)generationID
                               timeout:(NSTimeInterval)timeout
                            completion:(void (^)(BOOL, NSError *))completion {
@@ -1283,7 +1251,6 @@ static BOOL PXKeychainCommandIsSafeBundleIdentifier(NSString *bundleIdentifier) 
                                              YES);
         NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeout];
         [self pollReadinessForBundleIdentifier:bundleIdentifier
-                                     profileID:profileID
                                   generationID:generationID
                                       deadline:deadline
                                     completion:completion];

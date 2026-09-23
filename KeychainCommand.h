@@ -16,15 +16,11 @@ FOUNDATION_EXPORT NSString *PXKeychainCommandDefaultRootDirectory(void);
 FOUNDATION_EXPORT BOOL PXKeychainCommandReceiverShouldRegisterForBundleIdentifier(
     NSString *bundleIdentifier
 );
-FOUNDATION_EXPORT BOOL PXKeychainCommandProfileIdentifierIsValid(
-    NSString * _Nullable profileIdentifier
-);
 
 @interface PXKeychainCommandRequest : NSObject
 
 @property (nonatomic, copy, readonly) NSString *requestID;
 @property (nonatomic, copy, readonly) NSString *targetBundleID;
-@property (nonatomic, copy, readonly) NSString *profileID;
 @property (nonatomic, copy, readonly) NSString *generationID;
 @property (nonatomic, copy, readonly) NSString *operation;
 @property (nonatomic, strong, readonly) NSDate *createdAt;
@@ -35,7 +31,6 @@ FOUNDATION_EXPORT BOOL PXKeychainCommandProfileIdentifierIsValid(
 + (nullable instancetype)requestWithPropertyList:(NSDictionary<NSString *, id> *)propertyList
                                            error:(NSError * _Nullable * _Nullable)error;
 + (nullable instancetype)freshRequestForBundleIdentifier:(NSString *)bundleIdentifier
-                                                profileID:(NSString *)profileID
                                              generationID:(NSString *)generationID
                                includeSharedAccessGroups:(BOOL)includeSharedAccessGroups
                                includeSynchronizableItems:(BOOL)includeSynchronizableItems
@@ -82,13 +77,11 @@ FOUNDATION_EXPORT NSString *const PXKeychainClassIdentity;
 @interface PXKeychainCommandContext : NSObject
 
 @property (nonatomic, copy, readonly) NSString *bundleIdentifier;
-@property (nonatomic, copy, readonly) NSString *profileID;
 @property (nonatomic, copy, readonly) NSString *generationID;
 @property (nonatomic, assign, readonly, getter=isApplicationEnabled) BOOL applicationEnabled;
 @property (nonatomic, assign, readonly, getter=isExtensionEnabled) BOOL extensionEnabled;
 
 - (instancetype)initWithBundleIdentifier:(NSString *)bundleIdentifier
-                                profileID:(NSString *)profileID
                              generationID:(NSString *)generationID
                        applicationEnabled:(BOOL)applicationEnabled
                          extensionEnabled:(BOOL)extensionEnabled;
@@ -123,12 +116,10 @@ FOUNDATION_EXPORT NSString *const PXKeychainClassIdentity;
 - (nullable PXKeychainCommandResponse *)responseForRequestID:(NSString *)requestID
                                                         error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)writeReadinessForBundleIdentifier:(NSString *)bundleIdentifier
-                                 profileID:(NSString *)profileID
                               generationID:(NSString *)generationID
                                        now:(NSDate *)now
                                      error:(NSError * _Nullable * _Nullable)error;
 - (BOOL)isReadyBundleIdentifier:(NSString *)bundleIdentifier
-                      profileID:(NSString *)profileID
                    generationID:(NSString *)generationID
                             now:(NSDate *)now
                     maximumAge:(NSTimeInterval)maximumAge;
@@ -203,7 +194,6 @@ FOUNDATION_EXPORT NSString *const PXKeychainClassIdentity;
 @protocol PXKeychainCommandTransport <NSObject>
 
 - (void)waitForReadyBundleIdentifier:(NSString *)bundleIdentifier
-                            profileID:(NSString *)profileID
                          generationID:(NSString *)generationID
                               timeout:(NSTimeInterval)timeout
                            completion:(void (^)(BOOL ready, NSError * _Nullable error))completion;

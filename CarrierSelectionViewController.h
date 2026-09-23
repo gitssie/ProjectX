@@ -30,7 +30,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
-@interface CarrierSelectionViewController : UIViewController <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating>
+@interface CarrierSelectionViewController : UIViewController <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UISearchControllerDelegate>
 
 @property (nonatomic, weak, nullable) id<CarrierSelectionViewControllerDelegate> delegate;
 @property (nonatomic, copy, readonly) NSArray<PXTrustedCarrierOption *> *carrierOptions;

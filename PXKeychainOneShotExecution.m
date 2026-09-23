@@ -899,7 +899,7 @@ static BOOL PXKeychainOneShotDrainDescriptor(int descriptor,
         if (lstat(responsePath.fileSystemRepresentation, &responseInfo) == 0 &&
             S_ISREG(responseInfo.st_mode) && !S_ISLNK(responseInfo.st_mode)) {
             NSDictionary<NSString *, id> *responsePropertyList =
-                [NSDictionary dictionaryWithContentsOfFile:responsePath];
+                PXProfileReadDictionary(responsePath);
             response = [PXKeychainCommandResponse responseWithPropertyList:responsePropertyList
                                                                       error:&operationError];
             if (response && (![response.requestID isEqualToString:request.requestID] ||

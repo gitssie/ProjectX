@@ -6,8 +6,8 @@
 
 __attribute__((constructor)) static void PXLoadScopedPayload(void) {
     @autoreleasepool {
-        NSDictionary *scope = [NSDictionary dictionaryWithContentsOfFile:
-            PXGlobalScopePreferencesPath()];
+        NSDictionary *scope = PXProfileReadDictionary(
+            PXGlobalScopePreferencesPath());
         NSString *bundleIdentifier = NSBundle.mainBundle.bundleIdentifier;
         NSString *processName = NSProcessInfo.processInfo.processName;
         if (!PXPayloadShouldLoadForIdentity(bundleIdentifier, processName, scope ?: @{})) {

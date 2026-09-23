@@ -206,8 +206,8 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
     NSDictionary<NSString *, id> *pendingModel = [self
         resolvedEnvironmentModelWithDidMigrate:nil
         error:&summaryError];
-    PXEnvironmentNetworkType pendingNetwork =
-        [self.environmentPolicyStore selectedNetworkTypeWithError:&summaryError];
+    NSSet<NSNumber *> *pendingNetworks =
+        [self.environmentPolicyStore selectedNetworkTypesWithError:&summaryError];
     NSDictionary<NSString *, id> *pendingLocation =
         [self.environmentPolicyStore configuredLocationWithError:&summaryError];
     BOOL pendingLocationWasCleared =
@@ -227,14 +227,21 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
         ? modelName
         : PXLocalizedString(@"image.summary.not_configured");
 
-    PXEnvironmentNetworkType displayedNetwork = pendingNetwork;
-    if (displayedNetwork == PXEnvironmentNetworkTypeUnspecified && !pendingModel) {
-        displayedNetwork = PXEnvironmentNetworkTypeFromIdentifier(
-            [activeManifest.network[@"configuredNetworkType"] isKindOfClass:[NSString class]]
-                ? activeManifest.network[@"configuredNetworkType"]
-                : nil);
+    NSSet<NSNumber *> *displayedNetworks = pendingNetworks;
+    if (displayedNetworks.count == 0 && !pendingModel) {
+        NSMutableSet<NSNumber *> *activeNetworks = [NSMutableSet set];
+        NSArray *identifiers = [activeManifest.network[@"configuredNetworkTypes"] isKindOfClass:NSArray.class]
+            ? activeManifest.network[@"configuredNetworkTypes"]
+            : @[activeManifest.network[@"configuredNetworkType"] ?: @""];
+        for (id identifier in identifiers) {
+            PXEnvironmentNetworkType type = [identifier isKindOfClass:NSString.class]
+                ? PXEnvironmentNetworkTypeFromIdentifier(identifier)
+                : PXEnvironmentNetworkTypeUnspecified;
+            if (type != PXEnvironmentNetworkTypeUnspecified) [activeNetworks addObject:@(type)];
+        }
+        displayedNetworks = [activeNetworks copy];
     }
-    self.environmentNetwork = [self localizedNetworkType:displayedNetwork];
+    self.environmentNetwork = [self localizedNetworkTypes:displayedNetworks];
 
     NSDictionary<NSString *, id> *carrier = [self selectedCarrierRecordForIdentityDirectory:
         [identifierManager profileIdentityPath]];
@@ -284,9 +291,7 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
 
 - (nullable NSDictionary<NSString *, id> *)selectedCarrierRecordForIdentityDirectory:(NSString *)identityDirectory {
     if (identityDirectory.length == 0) return nil;
-    NSString *profileDirectory = [identityDirectory stringByDeletingLastPathComponent];
-    PXTrustedCarrierPolicyStore *store = [[PXTrustedCarrierPolicyStore alloc]
-        initWithProfileDirectory:profileDirectory];
+    PXTrustedCarrierPolicyStore *store = [[PXTrustedCarrierPolicyStore alloc] init];
     NSString *carrierID = [store selectedCarrierIDWithError:nil];
     for (NSDictionary<NSString *, id> *carrier in PXCarrierCatalog()) {
         if ([carrier[@"carrierID"] isEqualToString:carrierID]) {
@@ -306,6 +311,15 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
         case PXEnvironmentNetworkTypeNone: return PXLocalizedString(@"image.network.none");
         case PXEnvironmentNetworkTypeUnspecified: return PXLocalizedString(@"image.summary.not_configured");
     }
+}
+
+- (NSString *)localizedNetworkTypes:(NSSet<NSNumber *> *)networkTypes {
+    if (networkTypes.count == 0) return PXLocalizedString(@"image.summary.not_configured");
+    NSMutableArray<NSString *> *names = [NSMutableArray array];
+    for (NSString *identifier in PXEnvironmentNetworkTypeIdentifiers(networkTypes)) {
+        [names addObject:[self localizedNetworkType:PXEnvironmentNetworkTypeFromIdentifier(identifier)]];
+    }
+    return [names componentsJoinedByString:PXLocalizedString(@"image.network.summary.separator")];
 }
 
 - (PXHomeSection)homeSectionForTableSection:(NSInteger)tableSection {

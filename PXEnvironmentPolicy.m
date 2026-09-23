@@ -6,7 +6,6 @@
 
 NSString * const PXEnvironmentPolicyErrorDomain = @"com.hydra.projectx.environment-policy";
 
-static NSString *const PXEnvironmentPolicyFileName = @"com.hydra.projectx.pending-environment.plist";
 static NSString *const PXEnvironmentPolicyLocationSet = @"set";
 static NSString *const PXEnvironmentPolicyLocationCleared = @"cleared";
 static NSString *const PXEnvironmentPolicyModelModeCustom = @"custom";
@@ -32,6 +31,31 @@ PXEnvironmentNetworkType PXEnvironmentNetworkTypeFromIdentifier(NSString *identi
     if ([identifier isEqualToString:@"2g"]) return PXEnvironmentNetworkType2G;
     if ([identifier isEqualToString:@"none"]) return PXEnvironmentNetworkTypeNone;
     return PXEnvironmentNetworkTypeUnspecified;
+}
+
+static NSArray<NSNumber *> *PXOrderedEnvironmentNetworkTypes(void) {
+    return @[@(PXEnvironmentNetworkTypeWiFi), @(PXEnvironmentNetworkType5GNR),
+             @(PXEnvironmentNetworkType4GLTE), @(PXEnvironmentNetworkType3G),
+             @(PXEnvironmentNetworkType2G), @(PXEnvironmentNetworkTypeNone)];
+}
+
+PXEnvironmentNetworkType PXPreferredEnvironmentNetworkType(NSSet<NSNumber *> *networkTypes) {
+    for (NSNumber *type in PXOrderedEnvironmentNetworkTypes()) {
+        if ([networkTypes containsObject:type]) {
+            return (PXEnvironmentNetworkType)type.integerValue;
+        }
+    }
+    return PXEnvironmentNetworkTypeUnspecified;
+}
+
+NSArray<NSString *> *PXEnvironmentNetworkTypeIdentifiers(NSSet<NSNumber *> *networkTypes) {
+    NSMutableArray<NSString *> *identifiers = [NSMutableArray array];
+    for (NSNumber *type in PXOrderedEnvironmentNetworkTypes()) {
+        if ([networkTypes containsObject:type]) {
+            [identifiers addObject:PXEnvironmentNetworkTypeIdentifier((PXEnvironmentNetworkType)type.integerValue)];
+        }
+    }
+    return [identifiers copy];
 }
 
 BOOL PXEnvironmentNetworkTypeIsCompatibleWithModelRecord(
@@ -76,7 +100,7 @@ BOOL PXEnvironmentAllowsApplicationIdentityEnsure(
 
 @interface PXEnvironmentPolicyStore ()
 
-@property (nonatomic, copy, readwrite) NSString *filePath;
+@property (nonatomic, copy, readwrite, nullable) NSString *filePath;
 
 @end
 
@@ -86,7 +110,7 @@ BOOL PXEnvironmentAllowsApplicationIdentityEnsure(
     static PXEnvironmentPolicyStore *store = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        store = [[self alloc] initWithFilePath:PXPreferencesFilePath(PXEnvironmentPolicyFileName)];
+        store = [[self alloc] initWithFilePath:nil];
     });
     return store;
 }
@@ -106,10 +130,17 @@ BOOL PXEnvironmentAllowsApplicationIdentityEnsure(
 }
 
 - (nullable NSDictionary<NSString *, id> *)policyWithError:(NSError **)error {
-    if (![[NSFileManager defaultManager] fileExistsAtPath:self.filePath]) {
+    NSDictionary<NSString *, id> *policy = self.filePath
+        ? PXProfileReadDictionary(self.filePath) : PXCurrentProfileValue(@"environment");
+    if (!policy) {
+        if (!self.filePath &&
+            [[NSFileManager defaultManager] fileExistsAtPath:PXCurrentProfileInfoPath()] &&
+            !PXProfileReadContentsAtPath(PXCurrentProfileInfoPath())) {
+            if (error) *error = [self policyErrorWithCode:1 description:@"Current Profile configuration is invalid"];
+            return nil;
+        }
         return @{};
     }
-    NSDictionary<NSString *, id> *policy = [NSDictionary dictionaryWithContentsOfFile:self.filePath];
     if (![policy isKindOfClass:[NSDictionary class]]) {
         if (error) {
             *error = [self policyErrorWithCode:1 description:@"Pending environment configuration is invalid"];
@@ -120,19 +151,11 @@ BOOL PXEnvironmentAllowsApplicationIdentityEnsure(
 }
 
 - (BOOL)writePolicy:(NSDictionary<NSString *, id> *)policy error:(NSError **)error {
-    NSString *directory = self.filePath.stringByDeletingLastPathComponent;
-    NSError *directoryError = nil;
-    if (![[NSFileManager defaultManager] createDirectoryAtPath:directory
-                                   withIntermediateDirectories:YES
-                                                    attributes:nil
-                                                         error:&directoryError]) {
-        if (error) *error = directoryError;
-        return NO;
-    }
     NSArray<NSString *> *allowedKeys = @[
         @"modelIdentifier",
         @"modelSelectionMode",
         @"networkType",
+        @"networkTypes",
         @"location",
         @"locationState",
         @"pendingChanges",
@@ -147,18 +170,10 @@ BOOL PXEnvironmentAllowsApplicationIdentityEnsure(
             persisted[key] = value;
         }
     }
-    NSDictionary<NSString *, id> *legacyModel = [policy[@"modelRecord"]
-        isKindOfClass:[NSDictionary class]] ? policy[@"modelRecord"] : nil;
-    NSString *legacyModelIdentifier = [legacyModel[@"identifier"]
-        isKindOfClass:[NSString class]] ? legacyModel[@"identifier"] : nil;
-    NSString *persistedModelIdentifier = [persisted[@"modelIdentifier"]
-        isKindOfClass:[NSString class]] ? persisted[@"modelIdentifier"] : nil;
-    if (persistedModelIdentifier.length == 0 && legacyModelIdentifier.length > 0) {
-        persisted[@"modelIdentifier"] = legacyModelIdentifier;
-        persisted[@"modelSelectionMode"] = PXEnvironmentPolicyModelModeCustom;
-    }
-    persisted[@"schemaVersion"] = @1;
-    if (![persisted writeToFile:self.filePath atomically:YES]) {
+    BOOL saved = self.filePath
+        ? PXProfileWriteDictionary(persisted, self.filePath)
+        : PXSetCurrentProfileValue(@"environment", persisted);
+    if (!saved) {
         if (error) {
             *error = [self policyErrorWithCode:2 description:@"Pending environment configuration could not be saved"];
         }
@@ -202,11 +217,43 @@ BOOL PXEnvironmentAllowsApplicationIdentityEnsure(
 }
 
 - (PXEnvironmentNetworkType)selectedNetworkTypeWithError:(NSError **)error {
+    NSSet<NSNumber *> *networkTypes = [self selectedNetworkTypesWithError:error];
+    return PXPreferredEnvironmentNetworkType(networkTypes);
+}
+
+- (nullable NSSet<NSNumber *> *)selectedNetworkTypesWithError:(NSError **)error {
     NSDictionary<NSString *, id> *policy = [self policyWithError:error];
+    if (!policy) return nil;
+    id storedTypes = policy[@"networkTypes"];
+    if (storedTypes) {
+        if (![storedTypes isKindOfClass:NSArray.class] || [(NSArray *)storedTypes count] == 0) {
+            if (error) *error = [self policyErrorWithCode:4 description:@"Network types are invalid"];
+            return nil;
+        }
+        NSMutableSet<NSNumber *> *types = [NSMutableSet set];
+        for (id identifier in storedTypes) {
+            PXEnvironmentNetworkType type = [identifier isKindOfClass:NSString.class]
+                ? PXEnvironmentNetworkTypeFromIdentifier(identifier)
+                : PXEnvironmentNetworkTypeUnspecified;
+            if (type == PXEnvironmentNetworkTypeUnspecified ||
+                [types containsObject:@(type)]) {
+                if (error) *error = [self policyErrorWithCode:4 description:@"Network types are invalid"];
+                return nil;
+            }
+            [types addObject:@(type)];
+        }
+        if (types.count > 1 && [types containsObject:@(PXEnvironmentNetworkTypeNone)]) {
+            if (error) *error = [self policyErrorWithCode:4 description:@"No network cannot be combined with other types"];
+            return nil;
+        }
+        return [types copy];
+    }
     NSString *identifier = [policy[@"networkType"] isKindOfClass:[NSString class]]
         ? policy[@"networkType"]
         : nil;
-    return PXEnvironmentNetworkTypeFromIdentifier(identifier);
+    PXEnvironmentNetworkType type = PXEnvironmentNetworkTypeFromIdentifier(identifier);
+    return type == PXEnvironmentNetworkTypeUnspecified
+        ? [NSSet set] : [NSSet setWithObject:@(type)];
 }
 
 - (nullable NSDictionary<NSString *, id> *)configuredLocationWithError:(NSError **)error {
@@ -293,10 +340,24 @@ BOOL PXEnvironmentAllowsApplicationIdentityEnsure(
     } else {
         policy[@"modelIdentifier"] = identifier;
     }
-    PXEnvironmentNetworkType networkType = PXEnvironmentNetworkTypeFromIdentifier(policy[@"networkType"]);
-    if (networkType != PXEnvironmentNetworkTypeUnspecified &&
-        !PXEnvironmentNetworkTypeIsCompatibleWithModelRecord(networkType, modelRecord)) {
-        [policy removeObjectForKey:@"networkType"];
+    NSSet<NSNumber *> *selectedNetworkTypes = [self selectedNetworkTypesWithError:error];
+    if (!selectedNetworkTypes) return NO;
+    NSMutableSet<NSNumber *> *compatibleNetworkTypes = [selectedNetworkTypes mutableCopy];
+    for (NSNumber *type in selectedNetworkTypes) {
+        if (!PXEnvironmentNetworkTypeIsCompatibleWithModelRecord(
+            (PXEnvironmentNetworkType)type.integerValue, modelRecord)) {
+            [compatibleNetworkTypes removeObject:type];
+        }
+    }
+    if (![compatibleNetworkTypes isEqualToSet:selectedNetworkTypes]) {
+        if (compatibleNetworkTypes.count == 0) {
+            [policy removeObjectForKey:@"networkType"];
+            [policy removeObjectForKey:@"networkTypes"];
+        } else {
+            policy[@"networkTypes"] = PXEnvironmentNetworkTypeIdentifiers(compatibleNetworkTypes);
+            policy[@"networkType"] = PXEnvironmentNetworkTypeIdentifier(
+                PXPreferredEnvironmentNetworkType(compatibleNetworkTypes));
+        }
     }
     policy[@"pendingChanges"] = @YES;
     return [self writePolicy:policy error:error];
@@ -328,15 +389,34 @@ BOOL PXEnvironmentAllowsApplicationIdentityEnsure(
 - (BOOL)saveSelectedNetworkType:(PXEnvironmentNetworkType)networkType
                      modelRecord:(NSDictionary<NSString *, id> *)modelRecord
                            error:(NSError **)error {
-    if (!PXEnvironmentNetworkTypeIsCompatibleWithModelRecord(networkType, modelRecord)) {
+    return [self saveSelectedNetworkTypes:[NSSet setWithObject:@(networkType)]
+                             modelRecord:modelRecord error:error];
+}
+
+- (BOOL)saveSelectedNetworkTypes:(NSSet<NSNumber *> *)networkTypes
+                      modelRecord:(NSDictionary<NSString *, id> *)modelRecord
+                            error:(NSError **)error {
+    if (networkTypes.count == 0 ||
+        (networkTypes.count > 1 && [networkTypes containsObject:@(PXEnvironmentNetworkTypeNone)])) {
         if (error) {
-            *error = [self policyErrorWithCode:4 description:@"Network type is not supported by the selected model"];
+            *error = [self policyErrorWithCode:4 description:@"Select compatible network types"];
         }
         return NO;
     }
+    for (NSNumber *type in networkTypes) {
+        if (![type isKindOfClass:NSNumber.class] ||
+            !PXEnvironmentNetworkTypeIsCompatibleWithModelRecord(
+                (PXEnvironmentNetworkType)type.integerValue, modelRecord)) {
+            if (error) *error = [self policyErrorWithCode:4
+                                             description:@"Network type is not supported by the selected model"];
+            return NO;
+        }
+    }
     NSMutableDictionary<NSString *, id> *policy = [self mutablePolicyWithError:error];
     if (!policy) return NO;
-    policy[@"networkType"] = PXEnvironmentNetworkTypeIdentifier(networkType);
+    policy[@"networkTypes"] = PXEnvironmentNetworkTypeIdentifiers(networkTypes);
+    policy[@"networkType"] = PXEnvironmentNetworkTypeIdentifier(
+        PXPreferredEnvironmentNetworkType(networkTypes));
     policy[@"pendingChanges"] = @YES;
     return [self writePolicy:policy error:error];
 }

@@ -1,29 +1,11 @@
+#import "PXRootHidePath.h"
 #import "TrustedCarrierPolicy.h"
 
 #import "NetworkIdentity.h"
 
 static NSString *const PXTrustedCarrierPolicyErrorDomain = @"com.hydra.projectx.trusted-carrier-policy";
 
-@interface PXTrustedCarrierPolicyStore ()
-
-@property (nonatomic, copy) NSString *profileDirectory;
-
-@end
-
-
 @implementation PXTrustedCarrierPolicyStore
-
-- (instancetype)initWithProfileDirectory:(NSString *)profileDirectory {
-    self = [super init];
-    if (self) {
-        _profileDirectory = [profileDirectory copy];
-    }
-    return self;
-}
-
-- (NSString *)policyFilePath {
-    return [self.profileDirectory stringByAppendingPathComponent:@"trusted_carriers.plist"];
-}
 
 - (BOOL)failWithError:(NSError **)error code:(NSInteger)code description:(NSString *)description {
     if (error) {
@@ -35,27 +17,18 @@ static NSString *const PXTrustedCarrierPolicyErrorDomain = @"com.hydra.projectx.
 }
 
 - (BOOL)writeTrustedCarrierIDs:(NSSet<NSString *> *)trustedCarrierIDs error:(NSError **)error {
-    NSError *directoryError = nil;
-    if (![[NSFileManager defaultManager] createDirectoryAtPath:self.profileDirectory
-                                   withIntermediateDirectories:YES
-                                                    attributes:nil
-                                                         error:&directoryError]) {
-        if (error) *error = directoryError;
-        return NO;
-    }
     NSArray<NSString *> *sortedCarrierIDs = [trustedCarrierIDs.allObjects sortedArrayUsingSelector:@selector(compare:)];
     NSDictionary<NSString *, id> *policy = @{
-        @"schemaVersion": @1,
         @"trustedCarrierIDs": sortedCarrierIDs
     };
-    if (![policy writeToFile:[self policyFilePath] atomically:YES]) {
+    if (!PXSetCurrentProfileValue(@"trustedCarriers", policy)) {
         return [self failWithError:error code:2 description:@"Failed to persist trusted Carrier policy"];
     }
     return YES;
 }
 
 - (nullable NSSet<NSString *> *)trustedCarrierIDsWithError:(NSError **)error {
-    NSDictionary *policy = [NSDictionary dictionaryWithContentsOfFile:[self policyFilePath]];
+    NSDictionary *policy = PXCurrentProfileValue(@"trustedCarriers");
     NSArray *persistedIDs = [policy[@"trustedCarrierIDs"] isKindOfClass:[NSArray class]]
         ? policy[@"trustedCarrierIDs"]
         : nil;

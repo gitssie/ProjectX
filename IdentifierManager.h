@@ -27,6 +27,8 @@
 - (BOOL)setApplicationInScope:(NSString *)bundleID
                       enabled:(BOOL)enabled
                         error:(NSError **)error;
+- (BOOL)applyApplicationScopeChanges:(NSDictionary<NSString *, NSNumber *> *)changes
+                               error:(NSError **)error;
 - (BOOL)isExtensionEnabled:(NSString *)bundleID;
 - (BOOL)shouldSpoofForBundle:(NSString *)bundleID;
 - (BOOL)isBundleIDMatch:(NSString *)targetBundleID withPattern:(NSString *)patternBundleID;

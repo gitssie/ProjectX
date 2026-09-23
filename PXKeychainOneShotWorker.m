@@ -1,3 +1,4 @@
+#import "PXRootHidePath.h"
 #import <Foundation/Foundation.h>
 
 #include <errno.h>
@@ -61,7 +62,7 @@ int main(int argc, char *argv[]) {
             return 65;
         }
         NSDictionary<NSString *, id> *requestPropertyList =
-            [NSDictionary dictionaryWithContentsOfFile:requestPath];
+            PXProfileReadDictionary(requestPath);
         NSError *requestError = nil;
         PXKeychainCommandRequest *request = [PXKeychainCommandRequest
             requestWithPropertyList:requestPropertyList
@@ -81,7 +82,6 @@ int main(int argc, char *argv[]) {
         }
         PXKeychainCommandContext *context = [[PXKeychainCommandContext alloc]
             initWithBundleIdentifier:request.targetBundleID
-                           profileID:request.profileID
                         generationID:request.generationID
                   applicationEnabled:YES
                     extensionEnabled:NO];

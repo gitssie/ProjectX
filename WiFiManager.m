@@ -1,5 +1,4 @@
 #import "WiFiManager.h"
-#import "ProfileManager.h"
 #import "ProjectXLogging.h"
 #import "PXRootHidePath.h"
 #import <Security/Security.h>
@@ -8,7 +7,6 @@
 @property (nonatomic, strong) NSString *currentIdentifier;
 @property (nonatomic, strong) NSMutableDictionary *wifiInfo;
 @property (nonatomic, strong) NSError *error;
-@property (nonatomic, strong) NSString *currentProfileId;
 @property (nonatomic, weak) id profileChangeObserver;
 @end
 
@@ -48,120 +46,28 @@
         queue:[NSOperationQueue mainQueue] 
         usingBlock:^(NSNotification *note) {
             // Reload WiFi info when profile changes
-            NSString *newProfileId = note.userInfo[@"ProfileId"];
-            if (newProfileId && ![newProfileId isEqualToString:self.currentProfileId]) {
-                self.currentProfileId = newProfileId;
-                [self loadWiFiInfoFromCurrentProfile];
-                PXLog(@"[WiFiManager] Loaded WiFi info for new profile: %@", newProfileId);
-            }
+            [self loadWiFiInfoFromCurrentProfile];
     }];
 }
 
-- (NSString *)getCurrentProfileID {
-    // First try via ProfileManager
-    id profileManager = NSClassFromString(@"ProfileManager");
-    if (profileManager) {
-        id sharedManager = [profileManager sharedManager];
-        if ([sharedManager respondsToSelector:@selector(currentProfile)]) {
-            id currentProfile = [sharedManager currentProfile];
-            if (currentProfile && [currentProfile respondsToSelector:@selector(profileId)]) {
-                NSString *profileId = [currentProfile profileId];
-                if (profileId) {
-                    return profileId;
-                }
-            }
-        }
-    }
-    
-    // Fallback to direct file read if ProfileManager isn't available
-    NSString *currentProfileInfoPath = PXCurrentProfileInfoPath();
-    NSDictionary *profileInfo = [NSDictionary dictionaryWithContentsOfFile:currentProfileInfoPath];
-    
-    if (profileInfo && profileInfo[@"ProfileId"]) {
-        id profileIdValue = profileInfo[@"ProfileId"];
-        NSString *profileId = nil;
-        
-        // Handle both NSNumber and NSString types properly
-        if ([profileIdValue isKindOfClass:[NSNumber class]]) {
-            profileId = [profileIdValue stringValue];
-        } else if ([profileIdValue isKindOfClass:[NSString class]]) {
-            profileId = profileIdValue;
-        } else {
-            profileId = [profileIdValue description];
-        }
-        
-        PXLog(@"[WiFiManager] Got current profile ID from plist: %@", profileId);
-        return profileId;
-    }
-    
-    // If all else fails, use default
-    return @"default";
-}
-
 - (void)loadWiFiInfoFromCurrentProfile {
-    NSString *profileId = [self getCurrentProfileID];
-    if (!profileId) {
-        PXLog(@"[WiFiManager] No active profile, cannot load WiFi info");
-        return;
-    }
-    
-    self.currentProfileId = profileId;
-    
-    // Build path to WiFi info file in profile directory
-    NSString *identityDir = PXProfileIdentityDirectoryPath(profileId);
-    NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
-    
-    // Check if file exists
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:wifiInfoPath]) {
-        PXLog(@"[WiFiManager] No saved WiFi info found for profile %@", profileId);
-        return;
-    }
-    
-    // Load the saved info
-    NSMutableDictionary *savedInfo = [NSMutableDictionary dictionaryWithContentsOfFile:wifiInfoPath];
-    if (savedInfo) {
-        self.wifiInfo = savedInfo;
-        PXLog(@"[WiFiManager] Loaded WiFi info from profile %@: SSID=%@, BSSID=%@", 
-              profileId, savedInfo[@"ssid"], savedInfo[@"bssid"]);
-    }
+    NSDictionary *savedInfo = PXCurrentProfileValue(@"identity/wifi_info.plist");
+    if (savedInfo) self.wifiInfo = [savedInfo mutableCopy];
 }
 
 - (void)saveWiFiInfoToCurrentProfile {
-    NSString *profileId = [self getCurrentProfileID];
-    if (!profileId) {
-        PXLog(@"[WiFiManager] No active profile, cannot save WiFi info");
-        return;
-    }
-    
-    self.currentProfileId = profileId;
-    
-    // Build path to WiFi info file in profile directory
-    NSString *identityDir = PXProfileIdentityDirectoryPath(profileId);
-    NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
-    
-    // Ensure directory exists
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:identityDir]) {
-        [fileManager createDirectoryAtPath:identityDir 
-              withIntermediateDirectories:YES 
-                               attributes:nil 
-                                    error:nil];
-    }
-    
-    // Save to file
-    [self.wifiInfo writeToFile:wifiInfoPath atomically:YES];
-    
-    // Also update the combined device_ids.plist to include WiFi info
-    NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-    NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                     [NSMutableDictionary dictionary];
-    deviceIds[@"SSID"] = self.wifiInfo[@"ssid"];
-    deviceIds[@"BSSID"] = self.wifiInfo[@"bssid"];
-    [deviceIds writeToFile:deviceIdsPath atomically:YES];
-    
-    PXLog(@"[WiFiManager] Saved WiFi info to profile %@: SSID=%@, BSSID=%@", 
-          profileId, self.wifiInfo[@"ssid"], self.wifiInfo[@"bssid"]);
+    NSDictionary *wifiInfo = [self.wifiInfo copy];
+    PXProfileUpdateContentsAtPath(PXCurrentProfileInfoPath(), ^(NSMutableDictionary *profile) {
+        NSMutableDictionary *values = [profile[@"values"] isKindOfClass:[NSDictionary class]]
+            ? [profile[@"values"] mutableCopy] : [NSMutableDictionary dictionary];
+        NSMutableDictionary *deviceIDs = [values[@"identity/device_ids.plist"] isKindOfClass:[NSDictionary class]]
+            ? [values[@"identity/device_ids.plist"] mutableCopy] : [NSMutableDictionary dictionary];
+        deviceIDs[@"SSID"] = wifiInfo[@"ssid"] ?: @"";
+        deviceIDs[@"BSSID"] = wifiInfo[@"bssid"] ?: @"";
+        values[@"identity/device_ids.plist"] = deviceIDs;
+        values[@"identity/wifi_info.plist"] = wifiInfo;
+        profile[@"values"] = values;
+    });
 }
 
 #pragma mark - Core Methods
@@ -517,15 +423,6 @@
 }
 
 - (NSDictionary *)currentWiFiInfo {
-    // Always check the current profile ID first
-    NSString *currentId = [self getCurrentProfileID];
-    if (currentId && (self.currentProfileId == nil || ![self.currentProfileId isEqualToString:currentId])) {
-        PXLog(@"[WiFiManager] Profile change detected (%@ → %@), reloading WiFi info", 
-              self.currentProfileId ?: @"nil", currentId);
-        self.currentProfileId = currentId;
-        [self loadWiFiInfoFromCurrentProfile];
-    }
-    
     // If we don't have info, load from profile
     if (self.wifiInfo.count == 0) {
         [self loadWiFiInfoFromCurrentProfile];

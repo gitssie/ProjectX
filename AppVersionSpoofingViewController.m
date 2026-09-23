@@ -227,63 +227,10 @@
     }
 }
 
-- (NSString *)getAppVersionFilePathForBundleID:(NSString *)bundleID {
-    if (!bundleID) return nil;
-    
-    // Get the active profile ID
-    NSString *profileId = nil;
-    
-    // Try to get from IdentifierManager if available
-    Class idManagerClass = NSClassFromString(@"IdentifierManager");
-    if (idManagerClass && [idManagerClass respondsToSelector:@selector(sharedManager)]) {
-        id idManager = [idManagerClass performSelector:@selector(sharedManager)];
-        if ([idManager respondsToSelector:@selector(getActiveProfileId)]) {
-            profileId = [idManager performSelector:@selector(getActiveProfileId)];
-        }
-    }
-    
-    // Fallback if no profile ID found
-    if (!profileId) {
-        // First check the primary profile info file
-        NSString *centralInfoPath = PXCurrentProfileInfoPath();
-        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-        
-        profileId = centralInfo[@"ProfileId"];
-        if (!profileId) {
-            // If not found, check the legacy active_profile_info.plist
-            NSString *activeInfoPath = PXActiveProfileInfoPath();
-            NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
-            profileId = activeInfo[@"ProfileId"];
-        }
-        
-        if (!profileId) {
-            PXLog(@"[AppVersionSpoofing] No profile ID found, using default shared storage");
-            return nil;
-        }
-    }
-    
-    // Build the path to this profile's app versions directory
-    NSString *profileDir = PXProfileDirectoryPath(profileId);
-    NSString *appVersionsDir = [profileDir stringByAppendingPathComponent:@"app_versions"];
-    
-    // Check if the directory exists
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:appVersionsDir]) {
-        return nil;
-    }
-    
-    // Create a safe filename from the bundle ID
-    NSString *safeFilename = [bundleID stringByReplacingOccurrencesOfString:@"." withString:@"_"];
-    safeFilename = [safeFilename stringByAppendingString:@"_version.plist"];
-    
-    NSString *fullPath = [appVersionsDir stringByAppendingPathComponent:safeFilename];
-    
-    // Only return if file exists
-    if ([fileManager fileExistsAtPath:fullPath]) {
-        return fullPath;
-    }
-    
-    return nil;
+- (NSString *)getAppVersionKeyForBundleID:(NSString *)bundleID {
+    if (bundleID.length == 0) return nil;
+    NSString *key = [@"appVersions/" stringByAppendingString:bundleID];
+    return PXCurrentProfileValue(key) ? key : nil;
 }
 
 - (void)loadAppsData {
@@ -296,15 +243,15 @@
     PXLog(@"[AppVersionSpoofing] Trying to load multi-version spoof data from: %@", multiVersionFile);
     
     // Load scoped apps from the global scope file
-    NSDictionary *scopedAppsDict = [NSDictionary dictionaryWithContentsOfFile:scopedAppsFile];
+    NSDictionary *scopedAppsDict = PXProfileReadDictionary(scopedAppsFile);
     NSDictionary *savedApps = scopedAppsDict[@"ScopedApps"];
     
     // Load version spoofing data from global file
-    NSDictionary *versionSpoofDict = [NSDictionary dictionaryWithContentsOfFile:versionSpoofFile];
+    NSDictionary *versionSpoofDict = PXProfileReadDictionary(versionSpoofFile);
     NSDictionary *spoofedVersions = versionSpoofDict[@"SpoofedVersions"];
     
     // Load multi-version spoofing data
-    NSDictionary *multiVersionDict = [NSDictionary dictionaryWithContentsOfFile:multiVersionFile];
+    NSDictionary *multiVersionDict = PXProfileReadDictionary(multiVersionFile);
     NSDictionary *multiVersions = multiVersionDict[@"MultiVersions"];
     if (multiVersions) {
         self.multiVersionData = [multiVersions mutableCopy];
@@ -321,23 +268,11 @@
                 
                 // Get toggle state ONLY from global file
                 if (spoofInfo) {
-                    // Add spoofed version if available
-                    if (spoofInfo[@"spoofedVersion"]) {
-                        appInfo[@"spoofedVersion"] = spoofInfo[@"spoofedVersion"];
-                    }
-                    // Add spoofed build if available
-                    if (spoofInfo[@"spoofedBuild"]) {
-                        appInfo[@"spoofedBuild"] = spoofInfo[@"spoofedBuild"];
-                    }
-                    // Add spoofingEnabled toggle state
+                    // The global preference owns only the toggle state.
                     if (spoofInfo[@"spoofingEnabled"]) {
                         appInfo[@"spoofingEnabled"] = spoofInfo[@"spoofingEnabled"];
                     } else {
                         appInfo[@"spoofingEnabled"] = @NO;
-                    }
-                    // Add activeVersionIndex if available
-                    if (spoofInfo[@"activeVersionIndex"]) {
-                        appInfo[@"activeVersionIndex"] = spoofInfo[@"activeVersionIndex"];
                     }
                 } else {
                     // Set default toggle state if no info available
@@ -346,10 +281,10 @@
                 
                 // We should still load version and build data from profile files
                 // but toggle state always comes from global file
-                NSString *profileVersionFile = [self getAppVersionFilePathForBundleID:bundleID];
+                NSString *profileVersionFile = [self getAppVersionKeyForBundleID:bundleID];
                 if (profileVersionFile) {
                     // Load only version/build data from profile-specific file
-                    NSDictionary *appVersionData = [NSDictionary dictionaryWithContentsOfFile:profileVersionFile];
+                    NSDictionary *appVersionData = PXCurrentProfileValue(profileVersionFile);
                     if (appVersionData) {
                         // Add spoofed version if available
                         if (appVersionData[@"spoofedVersion"]) {
@@ -1062,55 +997,8 @@
     // Make sure spoofing is enabled when version is set - global setting only
     appInfo[@"spoofingEnabled"] = @YES;
     
-    // Update apps data
-    self.appsData[bundleID] = appInfo;
-    
-    // Save to profile-specific file directly - only store version data, not toggle state
-    NSString *profileVersionFile = nil;
-    
-    // Get the active profile ID for direct profile storage
-    NSString *profileId = nil;
-    
-    // Try to get from IdentifierManager if available
-    Class idManagerClass = NSClassFromString(@"IdentifierManager");
-    if (idManagerClass && [idManagerClass respondsToSelector:@selector(sharedManager)]) {
-        id idManager = [idManagerClass performSelector:@selector(sharedManager)];
-        if ([idManager respondsToSelector:@selector(getActiveProfileId)]) {
-            profileId = [idManager performSelector:@selector(getActiveProfileId)];
-        }
-    }
-    
-    if (profileId) {
-        // Build the path to this profile's app versions directory
-        NSString *profileDir = PXProfileDirectoryPath(profileId);
-        NSString *appVersionsDir = [profileDir stringByAppendingPathComponent:@"app_versions"];
-        
-        // Create the directory if it doesn't exist
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        if (![fileManager fileExistsAtPath:appVersionsDir]) {
-            NSDictionary *attributes = @{NSFilePosixPermissions: @0755,
-                                      NSFileOwnerAccountName: @"mobile"};
-            
-            NSError *dirError = nil;
-            if ([fileManager createDirectoryAtPath:appVersionsDir 
-                        withIntermediateDirectories:YES 
-                                         attributes:attributes
-                                              error:&dirError]) {
-                // Directory created successfully
-                profileVersionFile = [appVersionsDir stringByAppendingPathComponent:
-                                     [[bundleID stringByReplacingOccurrencesOfString:@"." withString:@"_"] 
-                                      stringByAppendingString:@"_version.plist"]];
-            } else {
-                PXLog(@"[AppVersionSpoofing] Error creating app versions directory: %@", dirError);
-            }
-        } else {
-            // Directory already exists
-            profileVersionFile = [appVersionsDir stringByAppendingPathComponent:
-                                 [[bundleID stringByReplacingOccurrencesOfString:@"." withString:@"_"] 
-                                  stringByAppendingString:@"_version.plist"]];
-        }
-        
-        if (profileVersionFile) {
+    NSString *profileVersionFile = [@"appVersions/" stringByAppendingString:bundleID];
+    {
             // Create the app version data dictionary for profile file - version data only
             NSMutableDictionary *appVersionData = [NSMutableDictionary dictionary];
             appVersionData[@"bundleID"] = bundleID;
@@ -1132,14 +1020,17 @@
             appVersionData[@"lastUpdated"] = [NSDate date];
             
             // Save to profile-specific file
-            BOOL success = [appVersionData writeToFile:profileVersionFile atomically:YES];
+            BOOL success = PXSetCurrentProfileValue(profileVersionFile, appVersionData);
             if (success) {
                 PXLog(@"[AppVersionSpoofing] Successfully saved version data to profile-specific file for %@", bundleID);
             } else {
                 PXLog(@"[AppVersionSpoofing] Failed to save to profile-specific file for %@", bundleID);
+                [self showErrorAlert:@"Could not save the version in current_profile.plist."];
+                return;
             }
-        }
     }
+
+    self.appsData[bundleID] = appInfo;
     
     // We should also update the toggle state in the global plist
     [self persistSpoofingToggleForBundleID:bundleID enabled:YES];
@@ -1245,7 +1136,7 @@
 
         NSString *versionSpoofFile = PXPreferencesFilePath(@"com.hydra.projectx.version_spoof.plist");
         
-        NSMutableDictionary *versionSpoofDict = [NSMutableDictionary dictionaryWithContentsOfFile:versionSpoofFile];
+        NSMutableDictionary *versionSpoofDict = [PXProfileReadDictionary(versionSpoofFile) mutableCopy];
         if (!versionSpoofDict || ![versionSpoofDict isKindOfClass:[NSDictionary class]]) {
             PXLog(@"[AppVersionSpoofing] versionSpoofDict is nil or invalid, starting new dictionary");
             versionSpoofDict = [NSMutableDictionary dictionary];
@@ -1272,12 +1163,7 @@
             if (appInfo[@"version"]) {
                 spoofInfo[@"version"] = appInfo[@"version"];
             }
-            if (appInfo[@"spoofedVersion"]) {
-                spoofInfo[@"spoofedVersion"] = appInfo[@"spoofedVersion"];
-            }
-            if (appInfo[@"spoofedBuild"]) {
-                spoofInfo[@"spoofedBuild"] = appInfo[@"spoofedBuild"];
-            }
+            [spoofInfo removeObjectsForKeys:@[@"spoofedVersion", @"spoofedBuild", @"activeVersionIndex"]];
         }
         
         spoofedVersions[bundleID] = spoofInfo;
@@ -1285,7 +1171,7 @@
         versionSpoofDict[@"LastUpdated"] = [NSDate date];
         
         // Save to global file
-        BOOL success = [versionSpoofDict writeToFile:versionSpoofFile atomically:YES];
+        BOOL success = PXProfileWriteDictionary(versionSpoofDict, versionSpoofFile);
         if (success) {
             PXLog(@"[AppVersionSpoofing] Successfully saved toggle state to global file for %@", bundleID);
         } else {
@@ -1424,7 +1310,7 @@
         };
         
         // Save to file
-        BOOL success = [multiVersionDict writeToFile:multiVersionFile atomically:YES];
+        BOOL success = PXProfileWriteDictionary(multiVersionDict, multiVersionFile);
         
         if (success) {
             PXLog(@"[AppVersionSpoofing] Successfully saved multi-version data to: %@", multiVersionFile);
@@ -1441,6 +1327,7 @@
     dispatch_async(dispatch_get_main_queue(), ^{
         // First save version/build data to profile-specific files (but NOT toggle state)
         NSMutableArray *bundlesWithProfileStorage = [NSMutableArray array];
+        BOOL profileSaveFailed = NO;
         
         // For each app in appsData, try to save version/build to a profile-specific file
         for (NSString *bundleID in self.appsData) {
@@ -1458,48 +1345,10 @@
             
             // Only proceed if there's actual version data to save (not toggle state)
             if ((spoofedVersion.length > 0) || (spoofedBuild.length > 0) || (activeVersionIndex != nil)) {
-                // Get the active profile ID
-                NSString *profileId = nil;
-                
-                // Try to get from IdentifierManager if available
-                Class idManagerClass = NSClassFromString(@"IdentifierManager");
-                if (idManagerClass && [idManagerClass respondsToSelector:@selector(sharedManager)]) {
-                    id idManager = [idManagerClass performSelector:@selector(sharedManager)];
-                    if ([idManager respondsToSelector:@selector(getActiveProfileId)]) {
-                        profileId = [idManager performSelector:@selector(getActiveProfileId)];
-                    }
-                }
-                
-                // If we have a profile ID, proceed with profile-specific storage
-                if (profileId) {
-                    // Build the path to this profile's app versions directory
-                    NSString *profileDir = PXProfileDirectoryPath(profileId);
-                    NSString *appVersionsDir = [profileDir stringByAppendingPathComponent:@"app_versions"];
-                    
-                    // Create the directory if it doesn't exist
-                    NSFileManager *fileManager = [NSFileManager defaultManager];
-                    if (![fileManager fileExistsAtPath:appVersionsDir]) {
-                        NSDictionary *attributes = @{NSFilePosixPermissions: @0755,
-                                                  NSFileOwnerAccountName: @"mobile"};
-                        
-                        NSError *dirError = nil;
-                        if (![fileManager createDirectoryAtPath:appVersionsDir 
-                                    withIntermediateDirectories:YES 
-                                                    attributes:attributes
-                                                        error:&dirError]) {
-                            PXLog(@"[AppVersionSpoofing] Error creating app versions directory: %@", dirError);
-                            continue;
-                        }
-                    }
-                    
-                    // Create a safe filename from the bundle ID
-                    NSString *safeFilename = [bundleID stringByReplacingOccurrencesOfString:@"." withString:@"_"];
-                    safeFilename = [safeFilename stringByAppendingString:@"_version.plist"];
-                    
-                    NSString *appVersionFile = [appVersionsDir stringByAppendingPathComponent:safeFilename];
-                    
+                NSString *appVersionFile = [@"appVersions/" stringByAppendingString:bundleID];
+                {
                     // Get existing data from file or create new dictionary
-                    NSMutableDictionary *appVersionData = [[NSDictionary dictionaryWithContentsOfFile:appVersionFile] mutableCopy];
+                    NSMutableDictionary *appVersionData = [PXCurrentProfileValue(appVersionFile) mutableCopy];
                     if (!appVersionData) {
                         appVersionData = [NSMutableDictionary dictionary];
                     }
@@ -1525,15 +1374,21 @@
                     appVersionData[@"lastUpdated"] = [NSDate date];
                     
                     // Save to profile-specific file
-                    BOOL success = [appVersionData writeToFile:appVersionFile atomically:YES];
+                    BOOL success = PXSetCurrentProfileValue(appVersionFile, appVersionData);
                     if (success) {
                         PXLog(@"[AppVersionSpoofing] Successfully saved version data to profile-specific file for %@", bundleID);
                         [bundlesWithProfileStorage addObject:bundleID];
                     } else {
                         PXLog(@"[AppVersionSpoofing] Failed to save to profile-specific file for %@", bundleID);
+                        profileSaveFailed = YES;
                     }
                 }
             }
+        }
+
+        if (profileSaveFailed) {
+            [self showErrorAlert:@"Could not save app versions in current_profile.plist."];
+            return;
         }
         
         // Now handle the global storage for all apps' toggle state
@@ -1553,7 +1408,7 @@
         }
         
         // Load existing global file
-        NSMutableDictionary *versionSpoofDict = [[NSDictionary dictionaryWithContentsOfFile:versionSpoofFile] mutableCopy];
+        NSMutableDictionary *versionSpoofDict = [PXProfileReadDictionary(versionSpoofFile) mutableCopy];
         if (!versionSpoofDict) {
             versionSpoofDict = [NSMutableDictionary dictionary];
         }
@@ -1586,16 +1441,7 @@
             spoofInfo[@"bundleID"] = bundleID;
             spoofInfo[@"version"] = appInfo[@"version"] ?: @"Unknown";
             
-            // Include version/build info as reference (but primary storage is profile files)
-            if (appInfo[@"spoofedVersion"]) {
-                spoofInfo[@"spoofedVersion"] = appInfo[@"spoofedVersion"];
-            }
-            if (appInfo[@"spoofedBuild"]) {
-                spoofInfo[@"spoofedBuild"] = appInfo[@"spoofedBuild"];
-            }
-            if (appInfo[@"activeVersionIndex"]) {
-                spoofInfo[@"activeVersionIndex"] = appInfo[@"activeVersionIndex"];
-            }
+            [spoofInfo removeObjectsForKeys:@[@"spoofedVersion", @"spoofedBuild", @"activeVersionIndex"]];
             
             // Include multi-version reference
             NSArray *multiVersions = self.multiVersionData[bundleID];
@@ -1612,7 +1458,7 @@
         versionSpoofDict[@"LastUpdated"] = [NSDate date];
         
         // Save to global file
-        BOOL success = [versionSpoofDict writeToFile:versionSpoofFile atomically:YES];
+        BOOL success = PXProfileWriteDictionary(versionSpoofDict, versionSpoofFile);
         
         if (success || bundlesWithProfileStorage.count > 0) {
             PXLog(@"[AppVersionSpoofing] Successfully saved app version data. Toggle states in global file, version info in %lu profile-specific files", 

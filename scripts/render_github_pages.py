@@ -278,7 +278,9 @@ def render_site(repository: Path, output: Path, base_url: str) -> dict[str, str]
     shutil.copy2(package_path, pool / package_path.name)
     rewrite_release(output / "Release")
 
-    source_url = base_url
+    # Sileo source URLs omit the terminal slash. Asset links still use the
+    # directory base URL above so Packages and depiction paths resolve.
+    source_url = base_url.rstrip("/")
     sileo_url = "sileo://source/" + source_url
     package_url = base_url + fields["Filename"]
     raw = {

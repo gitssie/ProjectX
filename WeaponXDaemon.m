@@ -244,7 +244,7 @@ extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
         @"protectedProcesses": self.protectedProcesses
     };
     
-    [state writeToFile:statePath atomically:YES];
+    PXProfileWriteDictionary(state, statePath);
 }
 
 - (void)log:(NSString *)message withType:(os_log_type_t)type {

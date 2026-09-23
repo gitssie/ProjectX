@@ -453,7 +453,7 @@ static NSString * const kWeaponXProcessIDs = @"WeaponXProcessIDs";
         @"startTime": [NSDate date]
     };
     
-    [state writeToFile:statePath atomically:YES];
+    PXProfileWriteDictionary(state, statePath);
 }
 
 - (void)updatePersistentState {
@@ -465,7 +465,7 @@ static NSString * const kWeaponXProcessIDs = @"WeaponXProcessIDs";
         @"processInfo": self.processInfo
     };
     
-    [state writeToFile:statePath atomically:YES];
+    PXProfileWriteDictionary(state, statePath);
 }
 
 #pragma mark - App Lifecycle Notifications
@@ -493,7 +493,7 @@ static NSString * const kWeaponXProcessIDs = @"WeaponXProcessIDs";
         @"protectedProcesses": self.protectedProcesses
     };
     
-    [state writeToFile:statePath atomically:YES];
+    PXProfileWriteDictionary(state, statePath);
 }
 
 @end

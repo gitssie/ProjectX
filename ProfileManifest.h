@@ -33,12 +33,12 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSDictionary<NSString *, NSSet<NSString *> *> *installIdentifierKeysByBundleIdentifier;
 @property (nonatomic, copy) NSDictionary<NSString *, id> *graphicsHostCapabilities;
 @property (nonatomic, assign) PXEnvironmentNetworkType networkType;
+@property (nonatomic, copy) NSSet<NSNumber *> *networkTypes;
 
 @end
 
 @interface PXProfileManifest : NSObject
 
-@property (nonatomic, readonly) NSInteger schemaVersion;
 @property (nonatomic, copy, readonly) NSString *generationID;
 @property (nonatomic, copy, readonly) NSString *seed;
 @property (nonatomic, copy, readonly) NSDate *generatedAt;
@@ -79,12 +79,17 @@ FOUNDATION_EXPORT NSUUID * _Nullable PXProfileVendorIdentifierForBundleIdentifie
 
 - (instancetype)initWithIdentityDirectory:(NSString *)identityDirectory;
 - (BOOL)promoteManifest:(PXProfileManifest *)manifest error:(NSError * _Nullable * _Nullable)error;
+- (BOOL)replaceActiveIdentifierValue:(NSString *)value
+                              forKey:(NSString *)key
+                               error:(NSError * _Nullable * _Nullable)error;
+- (BOOL)replaceActiveLocalIPAddress:(NSString *)ipv4
+                       IPv6Address:(NSString *)ipv6
+                             error:(NSError * _Nullable * _Nullable)error;
 - (nullable NSString *)activeGenerationIDWithError:(NSError * _Nullable * _Nullable)error;
 - (nullable PXProfileManifest *)activeManifestWithError:(NSError * _Nullable * _Nullable)error;
 - (nullable NSDictionary<NSString *, NSDictionary<NSString *, id> *> *)activeApplicationIdentityPropertyListsWithError:(NSError * _Nullable * _Nullable)error;
 - (BOOL)replaceActiveApplicationIdentityPropertyLists:(NSDictionary<NSString *, NSDictionary<NSString *, id> *> *)appIdentities
                                                  error:(NSError * _Nullable * _Nullable)error;
-- (BOOL)migrateLegacyProfileIfNeededWithError:(NSError * _Nullable * _Nullable)error;
 - (BOOL)ensureApplicationIdentityForBundleIdentifier:(NSString *)bundleIdentifier
                                      groupIdentifiers:(NSSet<NSString *> *)groupIdentifiers
                                 installIdentifierKeys:(NSSet<NSString *> *)installIdentifierKeys

@@ -13,7 +13,7 @@ export GIT_SSH_COMMAND
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
 pages_branch=gh-pages
-pages_url=https://gitssie.github.io/ProjectX/
+pages_url=https://gitssie.github.io/ProjectX
 remote_name=origin
 dry_run=0
 package_override=""

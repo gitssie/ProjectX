@@ -4,8 +4,6 @@
 #import <sys/utsname.h>
 
 @interface DeviceModelManager ()
-@property (nonatomic, strong) NSString *currentIdentifier;
-@property (nonatomic, strong) NSError *error;
 @property (nonatomic, strong) NSDictionary *deviceSpecifications;
 @end
 
@@ -674,35 +672,6 @@
     return sharedManager;
 }
 
-- (NSString *)generateDeviceModel {
-    self.error = nil;
-    NSArray<NSString *> *deviceModels = self.deviceSpecifications.allKeys;
-    
-    // If no models available (should never happen), return nil
-    if (deviceModels.count == 0) {
-        self.error = [NSError errorWithDomain:@"com.weaponx.device"
-                                         code:1
-                                     userInfo:@{NSLocalizedDescriptionKey: @"No iPhone models are available"}];
-        return nil;
-    }
-    
-    // Pick a random device model
-    NSUInteger idx = arc4random_uniform((uint32_t)deviceModels.count);
-    NSString *modelString = deviceModels[idx];
-    self.currentIdentifier = modelString;
-    return self.currentIdentifier;
-}
-
-- (NSString *)currentDeviceModel {
-    return self.currentIdentifier;
-}
-
-- (void)setCurrentDeviceModel:(NSString *)deviceModel {
-    if ([self isValidDeviceModel:deviceModel]) {
-        self.currentIdentifier = [deviceModel copy];
-    }
-}
-
 - (BOOL)isValidDeviceModel:(NSString *)deviceModel {
     // Basic validation: non-empty, matches known pattern
     if (!deviceModel || deviceModel.length < 6 || deviceModel.length > 20) return NO;
@@ -713,10 +682,6 @@
     NSUInteger matches = [regex numberOfMatchesInString:deviceModel options:0 range:NSMakeRange(0, deviceModel.length)];
     
     return matches == 1;
-}
-
-- (NSError *)lastError {
-    return self.error;
 }
 
 @end

@@ -58,7 +58,7 @@ static NSDictionary *loadScopedApps(void) {
             scopedAppsCacheTimestamp = [NSDate date];
             return scopedAppsCache;
         }
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
+        NSDictionary *plistDict = PXProfileReadDictionary(validPath);
         if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
             scopedAppsCacheTimestamp = [NSDate date];
             return scopedAppsCache;
@@ -146,33 +146,11 @@ static BOOL isBatterySpoofingEnabled(void) {
     }
 }
 
-// Helper: get battery level from profile battery_info.plist
 static NSString *getProfileBatteryLevel(void) {
-    @try {
-        // Get current profile ID
-        NSString *profilesPath = PXCurrentProfileInfoPath();
-        NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
-        if (!currentProfileInfo) {
-            return nil;
-        }
-        NSString *profileId = currentProfileInfo[@"ProfileId"];
-        if (!profileId) {
-            return nil;
-        }
-        NSString *identityDir = PXProfileDirectoryPath(profileId);
-        NSString *batteryInfoPath = [identityDir stringByAppendingPathComponent:@"battery_info.plist"];
-        NSDictionary *batteryInfo = [NSDictionary dictionaryWithContentsOfFile:batteryInfoPath];
-        if (!batteryInfo) {
-            return nil;
-        }
-        NSString *level = batteryInfo[@"BatteryLevel"];
-        if (level && [level floatValue] >= 0.01 && [level floatValue] <= 1.0) {
-            return level;
-        }
-        return nil;
-    } @catch (NSException *e) {
-        return nil;
-    }
+    NSDictionary *batteryInfo = PXCurrentProfileValue(@"batteryInfo");
+    NSString *level = [batteryInfo[@"BatteryLevel"] isKindOfClass:[NSString class]]
+        ? batteryInfo[@"BatteryLevel"] : nil;
+    return level && [level floatValue] >= 0.01 && [level floatValue] <= 1.0 ? level : nil;
 }
 
 // Hook for -[UIDevice batteryLevel]

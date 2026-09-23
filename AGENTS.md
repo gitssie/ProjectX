@@ -19,7 +19,7 @@ ProjectX 是运行在 **Dopamine RootHide、iOS 15+** 真机上的本地 UIKit �
 3. Profile 是隐藏的后端状态，由系统自动生成和激活：不得恢复让用户创建、命名、选择、切换或管理 Profile 的旧 UI。
 4. 不实现 App 数据备份、恢复或快照功能，除非用户以后明确改变此决定。
 5. `WeaponXDaemon` 只承担本地 guardian/watchdog 职责，不得演变成网络服务。
-6. Profile schema 5 的地区身份由选定 Carrier 派生；目标进程中的地区 Hook 必须使用 generation-scoped、fail-closed 的缓存。
+6. 当前 Profile 的地区身份由选定 Carrier 派生；目标进程中的地区 Hook 必须使用 generation-scoped、fail-closed 的缓存。
 7. 身份值必须遵循真实生命周期和作用域，不允许在每次 getter 调用时重新随机：
    - 设备级值在 Profile 生命周期内稳定；
    - IDFV 按 Vendor/Profile 作用域稳定；
@@ -72,7 +72,7 @@ PXJBRootPath(@"/logical/path")
 - bootstrap 内的 `/var/mobile/Library/Preferences`
 - bootstrap 内的 `/usr/bin`
 
-优先使用 `PXRootHidePath.h/.m` 中已有的语义化 helper，例如 `PXProfilesDirectoryPath`、`PXGuardianDirectoryPath`、`PXWeaponXDaemonPath` 和 `PXBootstrapCommandPath`。不得在多个模块重复拼接同一路径。
+优先使用 `PXRootHidePath.h/.m` 中已有的语义化 helper，例如 `PXCurrentProfileInfoPath`、`PXGuardianDirectoryPath`、`PXWeaponXDaemonPath` 和 `PXBootstrapCommandPath`。不得在多个模块重复拼接同一路径。Profile 配置只存于 `current_profile.plist`，不得新增 Profile ID、Profile 目录或旧数据迁移路径。
 
 #### Real-rootfs 路径
 
@@ -139,7 +139,7 @@ Theos `roothide` scheme 会处理 package staging。以下文件中的安装位�
 - 每个 Hook 必须保存并在不适用时调用原实现。
 - 必须防止递归、重入和初始化顺序问题；不要在热路径进行磁盘扫描或同步网络工作。
 - Bundle ID、Profile、generation 和作用域检查必须在返回 spoof 值之前完成。
-- App、Tweak、Daemon 之间共享的数据格式必须向后兼容或带 schema/version 迁移。
+- App、Tweak、Daemon 之间共享的命令格式变更时必须同步更新协议版本与所有调用方。单文件 Profile 配置不做旧版 Profile 迁移。
 
 ### 4.4 数据清理安全边界
 
@@ -260,7 +260,7 @@ chmod 600 .deploy/deploy.env
 配置文件包含以下值：
 
 - `THEOS`：RootHide Theos 的绝对目录，`deploy` 和独立 `publish` 必需；
-- `PROJECTX_SILEO_SOURCE_URL`：Sileo 已配置的固定 device-loopback URL，必须为 `http://127.0.0.1:<device-port>/`；
+- `PROJECTX_SILEO_SOURCE_URL`：Sileo 已配置的固定 device-loopback URL，使用 `http://127.0.0.1:<device-port>`，末尾无斜杠；
 - `PROJECTX_SILEO_HTTP_PORT`：Mac loopback HTTP port；
 - `PROJECTX_SILEO_DEVICE_PORT`：device loopback reverse-forward port，必须与 source URL 一致；
 - `PROJECTX_SILEO_SSH_HOST`：现有 iproxy SSH endpoint host；
@@ -318,7 +318,17 @@ scripts/publish_github_pages.sh \
   publish
 ```
 
-公共 source URL 固定为 `https://gitssie.github.io/ProjectX/`，一键添加 URL 为 `sileo://source/https://gitssie.github.io/ProjectX/`。发布前必须满足：当前分支为 clean `main`、本地 HEAD 与远端 `origin/main` 完全一致、package identity/version/architecture 与 `control` 一致，且所有 `Packages*`、`Release`、deb size/hash、HTML 和 depiction validation 通过。脚本只能普通推进远端 `gh-pages`；并发发布或远端发生变化时应由 push rejection 安全停止。
+公共 source URL 固定为 `https://gitssie.github.io/ProjectX`，一键添加 URL 为 `sileo://source/https://gitssie.github.io/ProjectX`，末尾均无斜杠。发布前必须满足：当前分支为 clean `main`、本地 HEAD 与远端 `origin/main` 完全一致、package identity/version/architecture 与 `control` 一致，且所有 `Packages*`、`Release`、deb size/hash、HTML 和 depiction validation 通过。脚本只能普通推进远端 `gh-pages`；并发发布或远端发生变化时应由 push rejection 安全停止。
+
+已验证的日常发布顺序如下；只有用户明确授权 commit/push 后才可执行其中的写操作：
+
+1. 先完成源码修改、测试和 review，在 `main` 提交并执行 `git push origin main`。
+2. 确认 `git status --short` 无输出，且本地 `HEAD` 与 `refs/heads/main` 的远端 SHA 一致。
+3. 运行 `scripts/publish_github_pages.sh --dry-run publish`，确认发布前置条件通过。
+4. 运行 `scripts/publish_github_pages.sh publish`。该命令会在本机重新 clean build，不复用 GitHub Actions；随后完成 RootHide/package audit、APT metadata 与网页渲染，并从 `.deploy/tmp/github-pages.*` 中的隔离 Git repository 推送 `gh-pages`。
+5. 成功输出必须包含 `published_version`、`published_sha256`、`published_branch=gh-pages`、`source_url` 和 `sileo_url`。随后只做必要的只读验证：`git ls-remote` 确认 `main`/`gh-pages`，`gh api repos/gitssie/ProjectX/pages/builds/latest` 确认 Pages build 为 `built`，并以 `curl` 检查网页和 `Release` 返回 HTTP 200。无需启动浏览器或执行额外的 Google 测试，除非用户明确要求视觉检查。
+
+GitHub Pages 已配置为从 `gh-pages` 的 `/(root)` 发布；后续版本通常无需再次修改 Pages 设置。刚推送后短暂 404 可能只是 Pages 尚在构建，应先查询 Pages build 状态，不要立即重复或 force push。
 
 ## 9. 工作流程
 
@@ -342,7 +352,7 @@ scripts/publish_github_pages.sh \
 | 地区/位置 | `RegionIdentity.*`, `RegionEnvironment.*`, `LocationSpoofingManager.*` |
 | Daemon | `WeaponXDaemon.m`, `WeaponXGuardian.m`, `com.hydra.weaponx.guardian.plist` |
 | 权限 | `ent.plist`, `ProjectX.entitlements`, `layout/Library/libSandy/` |
-| 验证与 Sileo publication | `scripts/check_build_warnings.sh`, `scripts/deploy_sileo.sh` |
+| 验证与 Sileo publication | `scripts/check_build_warnings.sh`, `scripts/deploy_sileo.sh`, `scripts/publish_github_pages.sh`, `scripts/render_github_pages.py`, `pages/` |
 
 当旧设计文档、注释或历史实现与本文件冲突时，以本文件和用户最新明确要求为准，并在相关修改中同步修正文档。
 

@@ -31,19 +31,12 @@
 
 #pragma mark - Path Translation
 
-- (NSString *)translatePath:(NSString *)originalPath forApp:(NSString *)bundleID inProfile:(NSString *)profileID {
+- (NSString *)translatePath:(NSString *)originalPath forApp:(NSString *)bundleID {
     if (!bundleID || !originalPath || originalPath.length == 0) {
         return originalPath;
     }
     
-    if (!profileID) {
-        profileID = [self currentProfileID];
-        if (!profileID) {
-            return originalPath;
-        }
-    }
-    
-    NSString *appDataPath = [self appDataPath:bundleID inProfile:profileID];
+    NSString *appDataPath = [self appDataPath:bundleID];
     return [originalPath stringByReplacingOccurrencesOfString:@"/var/mobile/Library"
                                                   withString:[appDataPath stringByAppendingPathComponent:@"Library"]];
 }
@@ -54,28 +47,13 @@
 
 #pragma mark - Directory Structure
 
-- (NSString *)profileBasePath:(NSString *)profileID {
-    return PXProfileDirectoryPath(profileID);
+- (NSString *)appDataPath:(NSString *)bundleID {
+    return [[PXWeaponXDataPath() stringByAppendingPathComponent:@"AppData"]
+        stringByAppendingPathComponent:bundleID];
 }
 
-- (NSString *)appBasePath:(NSString *)profileID bundleID:(NSString *)bundleID {
-    NSString *profilePath = [self profileBasePath:profileID];
-    NSString *appDataPath = [profilePath stringByAppendingPathComponent:@"appdata"];
-    return [appDataPath stringByAppendingPathComponent:bundleID];
-}
-
-- (NSString *)appDataPath:(NSString *)bundleID inProfile:(NSString *)profileID {
-    return [self appBasePath:profileID bundleID:bundleID];
-}
-
-#pragma mark - Profile Integration
-
-- (void)profileDidChange:(NSString *)newProfileID {
-    _currentProfileID = newProfileID;
-}
-
-- (BOOL)prepareProfileDirectory:(NSString *)profileID {
-    NSString *basePath = [self profileBasePath:profileID];
+- (BOOL)prepareAppDataDirectory {
+    NSString *basePath = [PXWeaponXDataPath() stringByAppendingPathComponent:@"AppData"];
     NSError *error = nil;
     BOOL success = [self.fileManager createDirectoryAtPath:basePath
                             withIntermediateDirectories:YES
@@ -83,7 +61,7 @@
                                                   error:&error];
     
     if (!success) {
-        NSLog(@"[WeaponX] Failed to prepare profile directory: %@", error);
+        NSLog(@"[WeaponX] Failed to prepare app data directory: %@", error);
     }
     
     return success;

@@ -93,7 +93,7 @@ static NSDictionary *loadScopedApps(void) {
         }
         
         // Load the plist file safely
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
+        NSDictionary *plistDict = PXProfileReadDictionary(validPath);
         if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
             scopedAppsCacheTimestamp = [NSDate date];
             return scopedAppsCache;
@@ -188,65 +188,14 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
 
 // Add function to get spoofed Pasteboard UUID from manager
 static NSString *getSpoofedPasteboardUUID() {
-    // Use the PasteboardUUIDManager for consistent values across the app and hooks
-    PasteboardUUIDManager *manager = [PasteboardUUIDManager sharedManager];
-    NSString *uuid = [manager currentPasteboardUUID];
-    
-    if (uuid && uuid.length > 0) {
-        return uuid;
-    }
-    
-    // Generate a new UUID if none exists
-    uuid = [manager generatePasteboardUUID];
-    if (uuid && uuid.length > 0) {
-        return uuid;
-    }
-    
-    // Try to read directly from plist files
-    // First try to get the profile directory from environment or fallback
-    NSString *identityDir = nil;
-    
-    NSArray *possibleProfilePaths = @[PXProfilesDirectoryPath()];
-    
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    for (NSString *profileBasePath in possibleProfilePaths) {
-        if ([fileManager fileExistsAtPath:profileBasePath]) {
-            // Get current profile ID
-            NSString *currentProfileInfoPath = [profileBasePath stringByAppendingPathComponent:@"current_profile_info.plist"];
-            NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:currentProfileInfoPath];
-            NSString *profileId = currentProfileInfo[@"ProfileId"];
-            
-            if (profileId) {
-                identityDir = [[profileBasePath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
-                break;
-            }
-        }
-    }
-    
-    if (identityDir) {
-        // First try the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-        NSString *value = deviceIds[@"PasteboardUUID"];
-        
-        if (value) {
-            PXLog(@"[WeaponX] 🔄 Got PasteboardUUID from device_ids.plist: %@", value);
-            return value;
-        }
-        
-        // Try the specific uuid file
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"pasteboard_uuid.plist"];
-        NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-        if (uuidDict && uuidDict[@"value"]) {
-            PXLog(@"[WeaponX] 🔄 Got PasteboardUUID from pasteboard_uuid.plist: %@", uuidDict[@"value"]);
-            return uuidDict[@"value"];
-        }
-    }
-    
-    // If we still don't have a UUID, generate a new one rather than using zeros
-    uuid = [[NSUUID UUID] UUIDString];
-    PXLog(@"[WeaponX] 🔄 Generated fallback PasteboardUUID: %@", uuid);
-    return uuid;
+    NSDictionary *profile = PXProfileReadContentsAtPath(PXCurrentProfileInfoPath());
+    NSDictionary *manifest = [profile[@"manifest"] isKindOfClass:[NSDictionary class]]
+        ? profile[@"manifest"] : nil;
+    NSDictionary *identifiers = [manifest[@"identifiers"] isKindOfClass:[NSDictionary class]]
+        ? manifest[@"identifiers"] : nil;
+    NSString *value = [identifiers[@"pasteboardUUID"] isKindOfClass:[NSString class]]
+        ? identifiers[@"pasteboardUUID"] : nil;
+    return [[NSUUID alloc] initWithUUIDString:value] ? value : nil;
 }
 
 // Helper for safe change count management
@@ -352,6 +301,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
             // Get spoofed Pasteboard UUID
             NSString *uuidString = getSpoofedPasteboardUUID();
             NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:uuidString];
+            if (!uuid) return %orig;
             PXLog(@"[WeaponX] 🔄 Spoofing Pasteboard UUID with: %@", uuidString);
             return uuid;
         }
@@ -374,6 +324,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
         if (shouldSpoofForBundle(bundleID) && originalName && ![originalName isEqualToString:@"com.apple.UIKit.pboard.general"]) {
             // Get current pasteboard UUID
             NSString *uuidString = getSpoofedPasteboardUUID();
+            if (!uuidString) return originalName;
             
             // Create a stable, deterministic name based on the spoofed UUID
             // We only replace the last component to maintain compatibility
@@ -431,6 +382,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
         if (shouldSpoofForBundle(bundleID) && pasteboardName) {
             // Get current pasteboard UUID
             NSString *uuidString = getSpoofedPasteboardUUID();
+            if (!uuidString) return %orig;
             
             // Create a stable, deterministic name based on the spoofed UUID
             // We only replace the last component to maintain compatibility
@@ -487,6 +439,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
         if (shouldSpoofForBundle(bundleID) && url) {
             // Create a modified URL with our UUID to ensure stable but unique URLs
             NSString *uuidString = getSpoofedPasteboardUUID();
+            if (!uuidString) return %orig;
             NSString *shortUUID = [uuidString componentsSeparatedByString:@"-"].firstObject;
             
             // Create a new URL with our UUID injected to ensure stability
@@ -672,6 +625,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
                 if ([pasteboardType isEqualToString:@"com.apple.uikit.pboard-uuid"]) {
                     NSString *spoofedUUID = getSpoofedPasteboardUUID();
                     NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:spoofedUUID];
+                    if (!uuid) return originalValue;
                     
                     // Use modern API with error handling instead of deprecated method
                     NSError *archiveError = nil;

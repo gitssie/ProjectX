@@ -18,6 +18,20 @@ chmod 755 "$WEAPONX_DIR" "$GUARDIAN_DIR" "/Library/Sandbox/Profile"
 chown mobile:mobile "$WEAPONX_DIR"
 chown root:wheel "$GUARDIAN_DIR" "/Library/Sandbox/Profile"
 
+CURRENT_PROFILE="$WEAPONX_DIR/current_profile.plist"
+if [ ! -f "$CURRENT_PROFILE" ]; then
+    cat > "$CURRENT_PROFILE" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>ProfileName</key><string>ProjectX</string>
+  <key>values</key><dict/>
+</dict></plist>
+PLIST
+    chmod 644 "$CURRENT_PROFILE"
+    chown mobile:mobile "$CURRENT_PROFILE"
+fi
+
 if [ ! -f "$LIBSANDY_PROFILE" ]; then
     echo "error: LibSandy profile not found at $LIBSANDY_PROFILE" >&2
     exit 1

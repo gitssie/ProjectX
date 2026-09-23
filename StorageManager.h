@@ -98,19 +98,6 @@
 #pragma mark - Profile Management
 
 /**
- * Save storage settings to a specific profile
- * @param profileId The profile ID to save to
- */
-- (void)saveToProfile:(NSString *)profileId;
-
-/**
- * Load storage settings from a specific profile
- * @param profileId The profile ID to load from
- * @return YES if settings were loaded, NO if defaults were used
- */
-- (BOOL)loadFromProfile:(NSString *)profileId;
-
-/**
  * Save settings to current active profile
  */
 - (void)saveToCurrentProfile;

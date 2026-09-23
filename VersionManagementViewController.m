@@ -550,7 +550,7 @@
     NSString *multiVersionFile = PXPreferencesFilePath(@"com.hydra.projectx.multi_version_spoof.plist");
     
     // Load multi-version spoofing data
-    NSDictionary *multiVersionDict = [NSDictionary dictionaryWithContentsOfFile:multiVersionFile];
+    NSDictionary *multiVersionDict = PXProfileReadDictionary(multiVersionFile);
     NSDictionary *multiVersions = multiVersionDict[@"MultiVersions"];
     
     if (multiVersions) {
@@ -581,7 +581,7 @@
     }
     
     // Load existing multi-version data
-    NSMutableDictionary *multiVersionDict = [[NSDictionary dictionaryWithContentsOfFile:multiVersionFile] mutableCopy];
+    NSMutableDictionary *multiVersionDict = [PXProfileReadDictionary(multiVersionFile) mutableCopy];
     if (!multiVersionDict) {
         multiVersionDict = [NSMutableDictionary dictionary];
     }
@@ -597,173 +597,49 @@
     multiVersionDict[@"LastUpdated"] = [NSDate date];
     
     // Save to file
-    BOOL success = [multiVersionDict writeToFile:multiVersionFile atomically:YES];
+    BOOL success = PXProfileWriteDictionary(multiVersionDict, multiVersionFile);
     if (success) {
         PXLog(@"[VersionManagement] Successfully saved %lu versions for %@", (unsigned long)self.versions.count, self.bundleID);
     } else {
         PXLog(@"[VersionManagement] Failed to save versions data");
+        return;
     }
     
-    // Also update the active version in the version_spoof.plist
-    [self updateActiveVersionInSpoofPlist];
+    // Keep the active version in the current Profile file.
+    [self updateActiveVersionInCurrentProfile];
 }
 
-- (NSString *)getAppVersionFilePath {
-    // Get the active profile ID
-    NSString *profileId = nil;
-    
-    // Try to get from IdentifierManager if available
-    Class idManagerClass = NSClassFromString(@"IdentifierManager");
-    if (idManagerClass && [idManagerClass respondsToSelector:@selector(sharedManager)]) {
-        id idManager = [idManagerClass performSelector:@selector(sharedManager)];
-        if ([idManager respondsToSelector:@selector(getActiveProfileId)]) {
-            profileId = [idManager performSelector:@selector(getActiveProfileId)];
-        }
-    }
-    
-    // Fallback if no profile ID found
-    if (!profileId) {
-        // First check the primary profile info file
-        NSString *centralInfoPath = PXCurrentProfileInfoPath();
-        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-        
-        profileId = centralInfo[@"ProfileId"];
-        if (!profileId) {
-            // If not found, check the legacy active_profile_info.plist
-            NSString *activeInfoPath = PXActiveProfileInfoPath();
-            NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
-            profileId = activeInfo[@"ProfileId"];
-        }
-        
-        if (!profileId) {
-            PXLog(@"[VersionManagement] No profile ID found, using default shared storage");
-            return nil;
-        }
-    }
-    
-    // Build the path to this profile's app versions directory
-    NSString *profileDir = PXProfileDirectoryPath(profileId);
-    NSString *appVersionsDir = [profileDir stringByAppendingPathComponent:@"app_versions"];
-    
-    // Create the directory if it doesn't exist
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:appVersionsDir]) {
-        NSDictionary *attributes = @{NSFilePosixPermissions: @0755,
-                                    NSFileOwnerAccountName: @"mobile"};
-        
-        NSError *dirError = nil;
-        if (![fileManager createDirectoryAtPath:appVersionsDir 
-                    withIntermediateDirectories:YES 
-                                     attributes:attributes
-                                          error:&dirError]) {
-            PXLog(@"[VersionManagement] Error creating app versions directory: %@", dirError);
-            return nil;
-        }
-    }
-    
-    // Create a safe filename from the bundle ID
-    NSString *safeFilename = [self.bundleID stringByReplacingOccurrencesOfString:@"." withString:@"_"];
-    safeFilename = [safeFilename stringByAppendingString:@"_version.plist"];
-    
-    return [appVersionsDir stringByAppendingPathComponent:safeFilename];
+- (NSString *)getAppVersionKey {
+    return self.bundleID.length > 0
+        ? [@"appVersions/" stringByAppendingString:self.bundleID] : nil;
 }
 
-- (void)updateActiveVersionInSpoofPlist {
-    // Try profile-specific storage first
-    NSString *appVersionFile = [self getAppVersionFilePath];
-    BOOL usingProfileStorage = (appVersionFile != nil);
-    
-    // Get the shared storage paths as fallback
-    NSString *versionSpoofFile = PXPreferencesFilePath(@"com.hydra.projectx.version_spoof.plist");
-    
-    if (usingProfileStorage) {
-        // Using profile-specific storage - directly save app data to its own file
-        NSMutableDictionary *appVersionData = [NSMutableDictionary dictionary];
-        
-        // Set active version index and info
-        if (self.activeVersionIndex >= 0 && self.activeVersionIndex < self.versions.count) {
-            NSDictionary *activeVersion = self.versions[self.activeVersionIndex];
-            appVersionData[@"activeVersionIndex"] = @(self.activeVersionIndex);
-            appVersionData[@"spoofedVersion"] = activeVersion[@"version"];
-            appVersionData[@"spoofedBuild"] = activeVersion[@"build"];
-        } else {
-            // No active version
-            appVersionData[@"activeVersionIndex"] = @(-1);
-            [appVersionData removeObjectForKey:@"spoofedVersion"];
-            [appVersionData removeObjectForKey:@"spoofedBuild"];
-        }
-        
-        // Get app name from existing data
-        NSString *appName = self.appInfo[@"name"];
-        if (appName) {
-            appVersionData[@"name"] = appName;
-        }
-        appVersionData[@"bundleID"] = self.bundleID;
-        appVersionData[@"lastUpdated"] = [NSDate date];
-        
-        // Save to profile-specific file
-        BOOL success = [appVersionData writeToFile:appVersionFile atomically:YES];
-        if (success) {
-            PXLog(@"[VersionManagement] Successfully saved version data to profile-specific file for %@", self.bundleID);
-        } else {
-            PXLog(@"[VersionManagement] Failed to save to profile-specific file, will try shared storage");
-            usingProfileStorage = NO; // Fall back to shared storage
-        }
+- (void)updateActiveVersionInCurrentProfile {
+    NSString *key = [self getAppVersionKey];
+    if (!key) {
+        PXLog(@"[VersionManagement] Cannot save an active version without a bundle ID");
+        return;
     }
-    
-    // If profile-specific storage failed or wasn't available, use shared storage
-    if (!usingProfileStorage) {
-        // Load existing version spoof data
-        NSMutableDictionary *versionSpoofDict = [[NSDictionary dictionaryWithContentsOfFile:versionSpoofFile] mutableCopy];
-        if (!versionSpoofDict) {
-            versionSpoofDict = [NSMutableDictionary dictionary];
-        }
-        
-        NSMutableDictionary *spoofedVersions = [versionSpoofDict[@"SpoofedVersions"] mutableCopy];
-        if (!spoofedVersions) {
-            spoofedVersions = [NSMutableDictionary dictionary];
-        }
-        
-        // Update or create app entry
-        NSMutableDictionary *appEntry = [spoofedVersions[self.bundleID] mutableCopy];
-        if (!appEntry) {
-            appEntry = [NSMutableDictionary dictionary];
-        }
-        
-        // Set active version index and info
-        if (self.activeVersionIndex >= 0 && self.activeVersionIndex < self.versions.count) {
-            NSDictionary *activeVersion = self.versions[self.activeVersionIndex];
-            appEntry[@"activeVersionIndex"] = @(self.activeVersionIndex);
-            appEntry[@"spoofedVersion"] = activeVersion[@"version"];
-            appEntry[@"spoofedBuild"] = activeVersion[@"build"];
-        } else {
-            // No active version
-            appEntry[@"activeVersionIndex"] = @(-1);
-            [appEntry removeObjectForKey:@"spoofedVersion"];
-            [appEntry removeObjectForKey:@"spoofedBuild"];
-        }
-        
-        // Get app name from existing data
-        NSString *appName = self.appInfo[@"name"];
-        if (appName) {
-            appEntry[@"name"] = appName;
-        }
-        
-        // Update dictionaries
-        spoofedVersions[self.bundleID] = appEntry;
-        versionSpoofDict[@"SpoofedVersions"] = spoofedVersions;
-        versionSpoofDict[@"LastUpdated"] = [NSDate date];
-        
-        // Save to file
-        BOOL success = [versionSpoofDict writeToFile:versionSpoofFile atomically:YES];
-        if (success) {
-            PXLog(@"[VersionManagement] Successfully updated version spoof data for %@", self.bundleID);
-        } else {
-            PXLog(@"[VersionManagement] Failed to update version spoof data");
-        }
+
+    NSMutableDictionary *appVersionData = [NSMutableDictionary dictionary];
+    if (self.activeVersionIndex >= 0 && self.activeVersionIndex < self.versions.count) {
+        NSDictionary *activeVersion = self.versions[self.activeVersionIndex];
+        appVersionData[@"activeVersionIndex"] = @(self.activeVersionIndex);
+        if (activeVersion[@"version"]) appVersionData[@"spoofedVersion"] = activeVersion[@"version"];
+        if (activeVersion[@"build"]) appVersionData[@"spoofedBuild"] = activeVersion[@"build"];
+    } else {
+        appVersionData[@"activeVersionIndex"] = @(-1);
     }
-    
-    // Post notification to refresh UI
+    if (self.appInfo[@"name"]) {
+        appVersionData[@"name"] = self.appInfo[@"name"];
+    }
+    appVersionData[@"bundleID"] = self.bundleID;
+    appVersionData[@"lastUpdated"] = [NSDate date];
+
+    if (!PXSetCurrentProfileValue(key, appVersionData)) {
+        PXLog(@"[VersionManagement] Failed to save active version in current_profile.plist for %@", self.bundleID);
+        return;
+    }
     [[NSNotificationCenter defaultCenter] postNotificationName:@"com.hydra.projectx.appVersionDataChanged" object:nil];
 }
 

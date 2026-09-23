@@ -83,7 +83,7 @@ static void ensureDirectoryExists(NSString *filePath) {
         
         NSLog(@"[DomainBlockingSettings] Saving settings: %@", settings);
         
-        BOOL success = [settings writeToFile:settingsPath atomically:YES];
+        BOOL success = PXProfileWriteDictionary(settings, settingsPath);
         if (!success) {
             NSLog(@"[DomainBlockingSettings] ERROR: Failed to save settings!");
         } else {
@@ -99,7 +99,7 @@ static void ensureDirectoryExists(NSString *filePath) {
         NSString *settingsPath = getSettingsFilePath();
         NSLog(@"[DomainBlockingSettings] Loading from path: %@", settingsPath);
         
-        NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:settingsPath];
+        NSDictionary *settings = PXProfileReadDictionary(settingsPath);
         
         if (settings) {
             NSLog(@"[DomainBlockingSettings] Found settings file");

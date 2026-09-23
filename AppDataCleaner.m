@@ -784,12 +784,9 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
 }
 
 - (NSDictionary<NSString *, NSString *> *)activeKeychainProfileContextWithError:(NSError **)error {
-    NSDictionary<NSString *, id> *profileInfo = [NSDictionary dictionaryWithContentsOfFile:
-        PXCurrentProfileInfoPath()];
-    NSString *profileID = [profileInfo[@"ProfileId"] isKindOfClass:[NSString class]]
-        ? profileInfo[@"ProfileId"]
-        : nil;
-    if (!PXKeychainCommandProfileIdentifierIsValid(profileID)) {
+    NSDictionary<NSString *, id> *profileInfo = PXProfileReadContentsAtPath(
+        PXCurrentProfileInfoPath());
+    if (!profileInfo) {
         if (error) {
             *error = [NSError errorWithDomain:PXKeychainCommandErrorDomain
                                          code:10
@@ -797,23 +794,11 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
         }
         return nil;
     }
-    NSString *identityDirectory = [[IdentifierManager sharedManager].profileIdentityPath
-        stringByStandardizingPath];
-    NSString *identityProfileID = identityDirectory.stringByDeletingLastPathComponent.lastPathComponent;
-    if (identityDirectory.length == 0 ||
-        [identityProfileID caseInsensitiveCompare:profileID] != NSOrderedSame) {
-        if (error) {
-            *error = [NSError errorWithDomain:PXKeychainCommandErrorDomain
-                                         code:10
-                                     userInfo:@{NSLocalizedDescriptionKey:
-                                         @"Active Profile metadata does not match its identity directory"}];
-        }
-        return nil;
-    }
+    NSString *identityDirectory = PXCurrentProfileIdentityValuesPath();
     NSError *manifestError = nil;
     PXProfileManifest *manifest = [[[PXProfileStore alloc]
         initWithIdentityDirectory:identityDirectory] activeManifestWithError:&manifestError];
-    if (!manifest || manifest.schemaVersion != 5 ||
+    if (!manifest ||
         ![[NSUUID alloc] initWithUUIDString:manifest.generationID]) {
         if (error) {
             *error = manifestError ?: [NSError errorWithDomain:PXKeychainCommandErrorDomain
@@ -823,7 +808,6 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
         return nil;
     }
     return @{
-        @"profileID": profileID.lowercaseString,
         @"generationID": manifest.generationID.lowercaseString
     };
 }
@@ -862,7 +846,6 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
 
 - (void)clearKeychainTargets:(NSArray<NSString *> *)targets
                        index:(NSUInteger)index
-                   profileID:(NSString *)profileID
                 generationID:(NSString *)generationID
                     responses:(NSMutableArray<PXKeychainCommandResponse *> *)responses
                    completion:(void (^)(BOOL,
@@ -875,7 +858,6 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
     NSError *requestError = nil;
     PXKeychainCommandRequest *request = [PXKeychainCommandRequest
         freshRequestForBundleIdentifier:targets[index]
-        profileID:profileID
         generationID:generationID
         includeSharedAccessGroups:YES
         includeSynchronizableItems:NO
@@ -889,7 +871,6 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
     IdentifierManager *manager = [IdentifierManager sharedManager];
     PXKeychainCommandContext *context = [[PXKeychainCommandContext alloc]
         initWithBundleIdentifier:request.targetBundleID
-                       profileID:profileID
                     generationID:generationID
               applicationEnabled:[manager isApplicationEnabled:request.targetBundleID]
                 extensionEnabled:[manager isExtensionEnabled:request.targetBundleID]];
@@ -913,7 +894,6 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
     [responses addObject:response];
     [self clearKeychainTargets:targets
                          index:index + 1
-                     profileID:profileID
                   generationID:generationID
                      responses:responses
                     completion:completion];
@@ -960,7 +940,6 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
         }
         [self clearKeychainTargets:targets
                             index:0
-                        profileID:profileContext[@"profileID"]
                      generationID:profileContext[@"generationID"]
                         responses:[NSMutableArray array]
                        completion:completion];
@@ -1605,7 +1584,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
             if ([item hasSuffix:@".app"]) {
                 NSString *infoPlistPath = [[appPath stringByAppendingPathComponent:item]
                     stringByAppendingPathComponent:@"Info.plist"];
-                NSDictionary *infoPlist = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
+                NSDictionary *infoPlist = PXProfileReadDictionary(infoPlistPath);
                 NSString *itemBundleID = infoPlist[@"CFBundleIdentifier"];
                 
                 if ([itemBundleID isEqualToString:bundleID]) {
@@ -1628,7 +1607,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
         NSString *containerPath = [dataRoot stringByAppendingPathComponent:uuid];
         NSString *metadataPath = [containerPath
             stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
-        NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+        NSDictionary *metadata = PXProfileReadDictionary(metadataPath);
         NSString *containerBundleID = metadata[@"MCMMetadataIdentifier"];
         // 1. Exact match
         if ([containerBundleID isEqualToString:bundleID]) return uuid;
@@ -1668,7 +1647,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
     for (NSString *uuid in groupDirs) {
         NSString *metadataPath = [[groupRoot stringByAppendingPathComponent:uuid]
             stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
-        NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+        NSDictionary *metadata = PXProfileReadDictionary(metadataPath);
         if (PXMetadataValueOwnsBundleIdentifier(metadata, bundleID)) {
             [groupUUIDs addObject:uuid];
         }
@@ -1839,7 +1818,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
     [possibleAccessGroups addObject:@"com.zimride.instant.keychainaccess"]; // Updated Lyft
     [possibleAccessGroups addObject:@"com.grubhub.search.keychainaccess"]; // Updated GrubHub
     [possibleAccessGroups addObject:@"doordash.DoorDashConsumer.keychainaccess"]; // Updated DoorDash
-    [possibleAccessGroups addObject:@"doordash.DoorDashConsumer.5P29S428QN.keychainaccess"]; // DoorDash with profile ID
+    [possibleAccessGroups addObject:@"doordash.DoorDashConsumer.5P29S428QN.keychainaccess"]; // DoorDash access group
     [possibleAccessGroups addObject:@"*uber*"];
     [possibleAccessGroups addObject:@"*ubercab*"];
     [possibleAccessGroups addObject:@"*helix*"]; // Added Helix wildcard
@@ -2137,7 +2116,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
         NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"containers.plist.temp"];
         [_fileManager copyItemAtPath:containerMgrPath toPath:tempPath error:nil];
         
-        NSMutableDictionary *containers = [NSMutableDictionary dictionaryWithContentsOfFile:tempPath];
+        NSMutableDictionary *containers = [PXProfileReadDictionary(tempPath) mutableCopy];
         if (containers) {
             BOOL modified = NO;
             NSArray *keys = [containers allKeys];
@@ -2154,7 +2133,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
             }
             
             if (modified) {
-                [containers writeToFile:tempPath atomically:YES];
+                PXProfileWriteDictionary(containers, tempPath);
                 [self runCommandWithPrivileges:[NSString stringWithFormat:@"cp '%@' '%@'", tempPath, containerMgrPath]];
             }
         }
@@ -2637,7 +2616,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
         if ([_fileManager fileExistsAtPath:dbPath]) {
             // For plist files
             if ([dbPath hasSuffix:@".plist"]) {
-                NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:dbPath];
+                NSDictionary *plist = PXProfileReadDictionary(dbPath);
                 NSString *plistStr = [plist description];
                 
                 if ([plistStr containsString:bundleID]) {
@@ -2790,7 +2769,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
     for (NSString *uuid in [dataDirs sortedArrayUsingSelector:@selector(compare:)]) {
         NSString *metadataPath = [[dataRoot stringByAppendingPathComponent:uuid]
             stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
-        NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+        NSDictionary *metadata = PXProfileReadDictionary(metadataPath);
         NSString *containerBundleID = metadata[@"MCMMetadataIdentifier"];
         if ([containerBundleID isEqualToString:bundleID]) {
             return uuid;
@@ -2805,7 +2784,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
     for (NSString *uuid in [groupDirs sortedArrayUsingSelector:@selector(compare:)]) {
         NSString *metadataPath = [[groupRoot stringByAppendingPathComponent:uuid]
             stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
-        NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+        NSDictionary *metadata = PXProfileReadDictionary(metadataPath);
         if (PXMetadataValueOwnsBundleIdentifier(metadata, bundleID)) {
             [groupUUIDs addObject:uuid];
         }
@@ -2826,7 +2805,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
             if ([item hasSuffix:@".app"]) {
                 NSString *infoPlistPath = [[appPath stringByAppendingPathComponent:item]
                     stringByAppendingPathComponent:@"Info.plist"];
-                NSDictionary *infoPlist = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
+                NSDictionary *infoPlist = PXProfileReadDictionary(infoPlistPath);
                 NSString *itemBundleID = infoPlist[@"CFBundleIdentifier"];
                 if ([itemBundleID isEqualToString:bundleID]) { result = uuid; return; }
             }
@@ -2844,7 +2823,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
         NSString *uuid = dataDirs[i];
         NSString *metadataPath = [[dataRoot stringByAppendingPathComponent:uuid]
             stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
-        NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+        NSDictionary *metadata = PXProfileReadDictionary(metadataPath);
         NSString *containerBundleID = metadata[@"MCMMetadataIdentifier"];
         if (containerBundleID && [containerBundleID hasPrefix:bundleID] && ![containerBundleID isEqualToString:bundleID]) {
             // Find bundle UUID for extension
@@ -3309,7 +3288,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
     for (NSString *uuid in allDataContainers) {
         NSString *metadataPath = [[dataRoot stringByAppendingPathComponent:uuid]
             stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
-        NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+        NSDictionary *metadata = PXProfileReadDictionary(metadataPath);
         NSString *containerBundleID = metadata[@"MCMMetadataIdentifier"];
         
         // Check if this is an extension of our app (extensions often have the app's bundle ID as a prefix)
@@ -3335,7 +3314,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
         PXRootFSPath(@"/var/mobile/Containers/Data/PluginKitPlugin/*")];
     for (NSString *pluginPath in pluginKitPaths) {
         NSString *metadataPath = [pluginPath stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
-        NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+        NSDictionary *metadata = PXProfileReadDictionary(metadataPath);
         
         NSString *containerID = metadata[@"MCMMetadataIdentifier"];
         if (containerID && [containerID hasPrefix:bundleID]) {
@@ -3371,7 +3350,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
                 if ([item hasSuffix:@".appex"]) {
                     NSString *infoPlistPath = [[appPath stringByAppendingPathComponent:item]
                         stringByAppendingPathComponent:@"Info.plist"];
-                    NSDictionary *infoPlist = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
+                    NSDictionary *infoPlist = PXProfileReadDictionary(infoPlistPath);
                     NSString *itemBundleID = infoPlist[@"CFBundleIdentifier"];
                     
                     if ([itemBundleID isEqualToString:extensionBundleID]) {
@@ -3387,7 +3366,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
                         if ([plugin hasSuffix:@".appex"]) {
                             NSString *infoPlistPath = [[pluginsPath stringByAppendingPathComponent:plugin]
                                 stringByAppendingPathComponent:@"Info.plist"];
-                            NSDictionary *infoPlist = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
+                            NSDictionary *infoPlist = PXProfileReadDictionary(infoPlistPath);
                             NSString *itemBundleID = infoPlist[@"CFBundleIdentifier"];
                             
                             if ([itemBundleID isEqualToString:extensionBundleID]) {
@@ -3472,7 +3451,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
                 // Direct .appex file
                 if ([item hasSuffix:@".appex"]) {
                     NSString *infoPlistPath = [NSString stringWithFormat:@"%@%@/Info.plist", bundlePath, item];
-                    NSDictionary *infoPlist = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
+                    NSDictionary *infoPlist = PXProfileReadDictionary(infoPlistPath);
                     NSString *itemBundleID = infoPlist[@"CFBundleIdentifier"];
                     
                     if ([itemBundleID isEqualToString:extensionBundleID]) {
@@ -3489,7 +3468,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
                     for (NSString *plugin in plugins) {
                         if ([plugin hasSuffix:@".appex"]) {
                             NSString *infoPlistPath = [NSString stringWithFormat:@"%@/%@/Info.plist", pluginsPath, plugin];
-                            NSDictionary *infoPlist = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
+                            NSDictionary *infoPlist = PXProfileReadDictionary(infoPlistPath);
                             NSString *itemBundleID = infoPlist[@"CFBundleIdentifier"];
                             
                             if ([itemBundleID isEqualToString:extensionBundleID]) {
@@ -3590,7 +3569,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
         for (NSString *item in appContents) {
             if ([item hasSuffix:@".app"]) {
                 NSString *infoPlistPath = [NSString stringWithFormat:@"%@/%@/Info.plist", appPath, item];
-                NSDictionary *infoPlist = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
+                NSDictionary *infoPlist = PXProfileReadDictionary(infoPlistPath);
                 
                 if ([infoPlist[@"CFBundleIdentifier"] isEqualToString:bundleID]) {
                     NSLog(@"[AppDataCleaner] Found bundle container UUID: %@ for %@", uuid, bundleID);
@@ -3742,7 +3721,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
             // For system files, preserve but clear non-essential data
             if ([systemFile hasSuffix:@".plist"]) {
                 // Read the plist to keep only essential system keys
-                NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:fullPath];
+                NSDictionary *plist = PXProfileReadDictionary(fullPath);
                 if (plist && [plist isKindOfClass:[NSDictionary class]]) {
                     NSMutableDictionary *cleanPlist = [NSMutableDictionary dictionary];
                     
@@ -3760,7 +3739,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
                     }
                     
                     // Write the cleaned plist back
-                    [cleanPlist writeToFile:fullPath atomically:YES];
+                    PXProfileWriteDictionary(cleanPlist, fullPath);
                 }
             }
         }
@@ -3998,7 +3977,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
         NSString *metadataPath = [containerPath stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
         
         if ([fileManager fileExistsAtPath:metadataPath]) {
-            NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+            NSDictionary *metadata = PXProfileReadDictionary(metadataPath);
             if (PXMetadataValueOwnsBundleIdentifier(metadata, bundleID)) {
                 NSLog(@"[AppDataCleaner] Found app group container UUID: %@", container);
                 [groupUUIDs addObject:container];
@@ -4033,7 +4012,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
         NSString *metadataPath = [containerPath stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
         
         if ([fileManager fileExistsAtPath:metadataPath]) {
-                NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+                NSDictionary *metadata = PXProfileReadDictionary(metadataPath);
                 NSString *containerBundleID = metadata[@"MCMMetadataIdentifier"];
                 
             // Extensions must descend from the exact selected bundle identifier.
@@ -4069,7 +4048,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
         
         // Get and log the group identifier before wiping
         NSString *metadataPath = [NSString stringWithFormat:@"%@/.com.apple.mobile_container_manager.metadata.plist", containerPath];
-        NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+        NSDictionary *metadata = PXProfileReadDictionary(metadataPath);
         NSString *groupIdentifier = metadata[@"MCMMetadataIdentifier"];
         NSLog(@"[AppDataCleaner] Cleaning group with identifier: %@", groupIdentifier);
         
@@ -4504,7 +4483,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
                 NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"clients.plist.temp"];
                 [_fileManager copyItemAtPath:pattern toPath:tempPath error:nil];
                 
-                NSMutableDictionary *clients = [NSMutableDictionary dictionaryWithContentsOfFile:tempPath];
+                NSMutableDictionary *clients = [PXProfileReadDictionary(tempPath) mutableCopy];
                 if (clients) {
                     // Remove any entries for this bundle ID
                     NSMutableArray *keysToRemove = [NSMutableArray arrayWithArray:[clients.allKeys filteredArrayUsingPredicate:
@@ -4528,7 +4507,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
                             [clients removeObjectForKey:key];
                         }];
                         
-                        [clients writeToFile:tempPath atomically:YES];
+                        PXProfileWriteDictionary(clients, tempPath);
                         [self runCommandWithPrivileges:[NSString stringWithFormat:@"cp '%@' '%@'", tempPath, pattern]];
                     }
                 }
@@ -4614,7 +4593,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
                 NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"denylist.plist.temp"];
                 [_fileManager copyItemAtPath:pattern toPath:tempPath error:nil];
                 
-                NSMutableDictionary *denyList = [NSMutableDictionary dictionaryWithContentsOfFile:tempPath];
+                NSMutableDictionary *denyList = [PXProfileReadDictionary(tempPath) mutableCopy];
                 if (denyList) {
                     // Create list of keys to remove
                     NSMutableArray *keysToRemove = [NSMutableArray array];
@@ -4643,7 +4622,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
                         for (NSString *key in keysToRemove) {
                             [denyList removeObjectForKey:key];
                         }
-                        [denyList writeToFile:tempPath atomically:YES];
+                        PXProfileWriteDictionary(denyList, tempPath);
                         [self runCommandWithPrivileges:[NSString stringWithFormat:@"cp '%@' '%@'", tempPath, pattern]];
                     }
                 }
@@ -4702,7 +4681,7 @@ static PXTrustedContainerResolution *PXTrustedContainerResolutionForBundleIdenti
     
     for (NSString *dbPath in dbPaths) {
         if ([_fileManager fileExistsAtPath:dbPath]) {
-            NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:dbPath];
+            NSDictionary *plist = PXProfileReadDictionary(dbPath);
             if (plist[@"System"] && [plist[@"System"] objectForKey:bundleID]) {
                 NSLog(@"[AppDataCleaner] Found reference in LaunchServices database: %@", bundleID);
                 return YES;

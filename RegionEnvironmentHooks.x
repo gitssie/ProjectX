@@ -1,3 +1,4 @@
+#import "PXRootHidePath.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <Foundation/Foundation.h>
 
@@ -24,15 +25,11 @@ static NSDictionary<NSString *, id> *PXLoadCurrentRegionEnvironmentSource(void) 
     if (identityDirectory.length == 0) {
         return nil;
     }
-    NSString *manifestPath = [identityDirectory stringByAppendingPathComponent:@"profile_manifest.plist"];
-    NSDictionary<NSString *, id> *storedManifest = [NSDictionary dictionaryWithContentsOfFile:manifestPath];
-    if ([storedManifest[@"schemaVersion"] integerValue] != 5 ||
-        ![PXRegionIdentity identityWithPropertyList:storedManifest[@"region"]]) {
-        return nil;
-    }
     PXProfileManifest *manifest = [[[PXProfileStore alloc] initWithIdentityDirectory:identityDirectory]
         activeManifestWithError:nil];
-    if (!manifest || manifest.generationID.length == 0 || manifest.region.count == 0) {
+    if (!manifest ||
+        manifest.generationID.length == 0 || manifest.region.count == 0 ||
+        ![PXRegionIdentity identityWithPropertyList:manifest.region]) {
         return nil;
     }
     return @{ @"generationID": manifest.generationID, @"region": manifest.region };

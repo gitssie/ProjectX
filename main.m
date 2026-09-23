@@ -6,6 +6,7 @@
 #import "SupportViewController.h"
 #import <UserNotifications/UserNotifications.h>
 #import "AppDataCleaner.h"
+#import "ProfileManager.h"
 
 // Import our guardian
 extern void StartWeaponXGuardian(void);
@@ -17,6 +18,8 @@ extern void StartWeaponXGuardian(void);
 @implementation AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    // Establish the hidden default Profile before any screen reads pending settings.
+    (void)[ProfileManager sharedManager];
     self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
     self.window.backgroundColor = [UIColor systemBackgroundColor];
     

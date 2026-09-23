@@ -243,7 +243,7 @@
 "image.settings.environment.footer" = "选择会保存为待应用配置，不会更改当前环境。";
 "image.settings.open_hint" = "轻点两下以配置。";
 "image.settings.model.title" = "环境型号";
-"image.settings.network.title" = "网络类型";
+"image.settings.network.title" = "可用网络";
 "image.settings.carrier.title" = "运营商";
 "image.settings.region.title" = "地区和时区";
 "image.settings.location.title" = "智能位置";
@@ -270,7 +270,7 @@
 "image.target_apps.section.user" = "用户应用";
 "image.target_apps.section.system" = "系统应用";
 "image.target_apps.selection_summary" = "已选择 %ld 个应用";
-"image.target_apps.selection_hint" = "轻点两下以选择或取消选择此应用。选择会立即保存。";
+"image.target_apps.selection_hint" = "轻点两下选择或取消选择此应用，然后点击右上角确认保存。";
 "image.target_apps.loading.title" = "正在载入已安装应用";
 "image.target_apps.loading.message" = "正在查找此设备上符合条件的应用。";
 "image.target_apps.failure.title" = "无法载入应用";
@@ -283,8 +283,8 @@
 "image.target_apps.search_empty.message" = "请尝试其他应用名称或 Bundle ID。";
 "image.target_apps.extension_one" = "%@ · 包括 1 个扩展";
 "image.target_apps.extension_count" = "%@ · 包括 %ld 个扩展";
-"image.target_apps.selected_announcement" = "已选择应用。选择已保存。";
-"image.target_apps.deselected_announcement" = "已取消选择应用。选择已保存。";
+"image.target_apps.selected_announcement" = "已选择应用。点击确认后保存。";
+"image.target_apps.deselected_announcement" = "已取消选择应用。点击确认后保存。";
 "image.target_apps.persistence_failed.title" = "无法保存选择";
 "image.target_apps.persistence_failed.message" = "已恢复之前的应用选择。";
 "image.target_apps.persistence_failed.announcement" = "无法保存应用选择。之前的选择保持不变。";
@@ -321,14 +321,14 @@
 "image.model.catalog.footer" = "%ld 个目录型号。%@";
 "image.model.complete_identity.footer" = "兼容的变体由此设备不可变的硬件特征推断。仅 GPU 名称相同并不代表该型号可选。";
 "image.model.complete_identity.detail" = "标识符 %@ · CPU %@\nGPU %@ · Metal %@\n显示 %@ · 存储 %@ GB";
-"image.model.selection_hint" = "轻点两下以选择此完整型号身份。选择会保存到下一个环境。";
-"image.model.selected_announcement" = "已选择环境型号。";
+"image.model.selection_hint" = "轻点两下选择此完整型号身份，然后点击右上角确认保存。";
+"image.model.selected_announcement" = "已选择环境型号。点击确认后保存。";
 "image.model.other_group" = "其他型号";
 "image.model.use_this_device.section" = "推荐";
 "image.model.use_this_device.title" = "使用本机";
 "image.model.use_this_device.detail" = "%@（%@）\n已检测 %@ · %@";
 "image.model.use_this_device.summary" = "使用本机 — %@";
-"image.model.use_this_device.selection_hint" = "轻点两下，为下一个环境使用本机型号和图形能力。";
+"image.model.use_this_device.selection_hint" = "轻点两下选择本机型号，然后点击右上角确认保存。";
 "image.model.use_this_device.selected_announcement" = "已为下一个环境选择本机型号。";
 "image.model.incompatible.status_unavailable" = "此设备不可用";
 "image.model.incompatible.summary" = "需要 %@ 和 %@。此设备报告 %@ 和 %@。";
@@ -350,18 +350,20 @@
 "image.model.incompatible.alert.message" = "检测到的实体设备：%@（%@）— %@ · %@。\n请求的型号：%@（%@）— %@ · %@。\n%@\n该组合无法在此实体设备上形成可靠的真实设备配置。建议使用本机。";
 "image.model.incompatible.use_this_device.action" = "使用本机";
 
-"image.network.title" = "选择网络类型";
+"image.network.title" = "可用网络";
 "image.network.accessibility.list" = "网络类型选项";
 "image.network.unspecified" = "未配置";
 "image.network.wifi" = "Wi-Fi";
-"image.network.5g" = "5G（NR）";
+"image.network.5g" = "5G";
 "image.network.4g" = "4G（LTE）";
 "image.network.3g" = "3G";
 "image.network.2g" = "2G";
 "image.network.none" = "无网络";
-"image.network.footer" = "只有与所选环境型号兼容的网络类型才可使用。";
-"image.network.selection_hint" = "轻点两下以选择此网络类型。选择会保存到下一个环境。";
-"image.network.selected_announcement" = "已选择网络类型。";
+"image.network.footer" = "可多选下一个环境支持的网络，轻点“确认”保存。“无网络”不能与其他选项并存；5G 需要型号和运营商都支持。";
+"image.network.selection_hint" = "轻点两下以切换此网络，然后轻点“确认”保存。";
+"image.network.selected_announcement" = "网络选择已更新。轻点“确认”保存。";
+"image.network.confirm.title" = "确认";
+"image.network.summary.separator" = "、";
 "image.network.unsupported" = "所选型号不可用";
 "image.network.unsupported_announcement" = "所选环境型号不支持此网络类型。";
 
@@ -369,9 +371,11 @@
 "image.carrier.accessibility.list" = "运营商目录";
 "image.carrier.search.placeholder" = "搜索运营商或地区";
 "image.carrier.search.accessibility_label" = "搜索运营商";
-"image.carrier.footer" = "所选运营商会推导出一致的地区、语言、时区和网络身份。";
-"image.carrier.selection_hint" = "轻点两下以选择此运营商。选择会保存到下一个环境。";
-"image.carrier.selected_announcement" = "已选择 %@，%@。";
+"image.carrier.footer" = "选择运营商后，轻点“确认”才会保存到下一个环境。运营商决定地区、语言、时区和网络身份。";
+"image.carrier.selection_hint" = "轻点两下以选择此运营商，然后轻点“确认”保存。";
+"image.carrier.selected_announcement" = "已选择 %@，%@。轻点“确认”保存。";
+"image.carrier.confirm.title" = "确认";
+"image.carrier.confirm.hint" = "将此运营商保存到下一个环境。";
 "image.carrier.network_incompatible.announcement" = "此运营商不支持所选的 5G 网络类型。";
 "image.carrier.network_incompatible.title" = "运营商不兼容";
 "image.carrier.network_incompatible.message" = "请选择支持 5G 的运营商，或先选择其他网络类型。";
@@ -410,11 +414,12 @@
 "image.location.mismatch.warning" = "位置与运营商地区不一致";
 "image.location.clear.title" = "清除已保存位置";
 "image.location.clear.accessibility_label" = "清除已保存位置";
-"image.location.clear.accessibility_hint" = "清除为下一个环境保存的位置，不影响当前检测结果。";
+"image.location.clear.accessibility_hint" = "选择清除已保存位置，然后点击右上角确认。";
 "image.location.clear.announcement" = "智能位置已清除。";
-"image.location.use.title" = "使用此位置";
-"image.location.use.accessibility_label" = "使用此位置";
-"image.location.use.accessibility_hint" = "将检测到的 GEO IP 位置保存到下一个环境。";
+"image.location.use.title" = "选择此位置";
+"image.location.selected.title" = "已选择此位置";
+"image.location.use.accessibility_label" = "选择此位置";
+"image.location.use.accessibility_hint" = "选择检测到的 GEO IP 位置，然后点击右上角确认。";
 "image.location.use.announcement" = "智能位置已保存到下一个环境。";
 
 "language.title" = "语言";
@@ -426,7 +431,7 @@
 "language.option.simplified_chinese.detail" = "在 XenSpace 中使用简体中文。";
 "language.option.english.title" = "English";
 "language.option.english.detail" = "在 XenSpace 中使用英语。";
-"language.selection_hint" = "轻点两下以立即使用此界面语言。";
+"language.selection_hint" = "轻点两下选择此界面语言，然后点击右上角确认应用。";
 "language.changed_announcement" = "XenSpace 界面语言已更新。";
 
 "diagnostics.title" = "环境详情";

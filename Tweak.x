@@ -16,7 +16,6 @@
 #import <sys/sysctl.h>  // For sysctlbyname hooks
 #import <dirent.h>     // For DIR type
 #import <sys/mount.h>  // For statfs
-#import "ProfileManager.h" // For accessing current profile
 #import "ProfileIndicatorView.h" // For profile indicator
 #import <substrate.h>
 #import <sys/utsname.h>
@@ -524,17 +523,7 @@ static BOOL PXJailbreakSysctlByNameHandler(const char *name,
 // Extension method to add profile indicator
 %new
 - (UIImage *)weaponx_addProfileIndicator {
-    // Get the current profile ID from NSUserDefaults
-    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.hydra.projectx.shared"];
-    NSString *profileId = [defaults objectForKey:@"CurrentProfileID"];
-    
-    if (!profileId) {
-        profileId = @"1"; // Default to 1 if no profile ID is saved
-    }
-    
-    // Ensure profileId is treated as a string to avoid any numeric conversion issues
-    NSString *displayProfileId = [NSString stringWithFormat:@"%@", profileId];
-    PXLog(@"[WeaponX] Screenshot using profile ID: %@", displayProfileId);
+    PXLog(@"[WeaponX] Screenshot using current Profile");
     
     // Begin a new graphics context with the image size
     UIGraphicsBeginImageContextWithOptions(self.size, NO, self.scale);
@@ -543,7 +532,7 @@ static BOOL PXJailbreakSysctlByNameHandler(const char *name,
     [self drawAtPoint:CGPointZero];
     
     // Create the indicator text
-    NSString *indicatorText = [NSString stringWithFormat:@"←------------------ Profile Num: %@ -----------------→", displayProfileId];
+    NSString *indicatorText = @"←------------------ ProjectX -----------------→";
     
     // Create the attributes for the text
     UIFont *font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];

@@ -1,22 +1,19 @@
+#import "PXRootHidePath.h"
 #import "DeviceSpecificSpoofingViewController.h"
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "IdentifierManager.h"
 #import "DeviceModelManager.h"
 #import "ProfileIndicatorView.h"
-#import "ProfileManager.h"
-#import "ProfileButtonsView.h"
-#import "ProfileManagerViewController.h"
 #import "DeviceSpecificSpoofingViewController+EditLabel.h"
 
 @interface DeviceSpecificSpoofingViewController ()
 @property (nonatomic, strong) UIView *profileIndicatorView;
-@property (nonatomic, strong) UILabel *profileLabel; // Track the label for updates
+@property (nonatomic, strong) UILabel *appLabel;
 @property (nonatomic, strong) UIView *imeiCard;
 @property (nonatomic, strong) UIView *meidCard;
 @property (nonatomic, strong) UIView *deviceModelCard;
 @property (nonatomic, strong) UIView *deviceThemeCard; // New property for Device Theme card
-@property (nonatomic, strong) ProfileButtonsView *profileButtonsView;
 // Properties for advanced identifiers functionality
 @property (nonatomic, assign) BOOL showAdvancedIdentifiers;
 @property (nonatomic, strong) UIButton *showAdvancedButton;
@@ -43,85 +40,6 @@
     // Add vertical profile indicator bar (left side)
     [self setupProfileIndicator];
     // Profile indicator is now pinned to the left edge, not inside the stack view.
-
-    // Add profile buttons view (right side, vertically centered)
-    self.profileButtonsView = [[ProfileButtonsView alloc] initWithFrame:CGRectZero];
-    self.profileButtonsView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.profileButtonsView.layer.zPosition = 1000; // Ensure overlay is above cards
-    self.profileButtonsView.clipsToBounds = NO;
-    self.profileButtonsView.userInteractionEnabled = YES;
-    // Optional: add a subtle background for visibility
-    // self.profileButtonsView.backgroundColor = [[UIColor systemBackgroundColor] colorWithAlphaComponent:0.2];
-    [self.view addSubview:self.profileButtonsView];
-    __weak typeof(self) weakSelf = self;
-    self.profileButtonsView.onNewProfileTapped = ^{
-        UIAlertController *alertController = [UIAlertController alertControllerWithTitle:@"Create New Profile"
-                                                                                 message:nil
-                                                                          preferredStyle:UIAlertControllerStyleAlert];
-        [alertController addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-            textField.placeholder = @"Profile Name";
-            textField.clearButtonMode = UITextFieldViewModeWhileEditing;
-        }];
-        [alertController addTextFieldWithConfigurationHandler:^(UITextField *textField) {
-            textField.placeholder = @"Short Description (optional)";
-            textField.clearButtonMode = UITextFieldViewModeWhileEditing;
-        }];
-        NSString *sampleProfileID = [[ProfileManager sharedManager] generateProfileID];
-        alertController.message = [NSString stringWithFormat:@"NEW Profile ID: %@", sampleProfileID];
-        UIAlertAction *createAction = [UIAlertAction actionWithTitle:@"Create" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-            NSString *profileName = alertController.textFields.firstObject.text;
-            NSString *profileDesc = alertController.textFields.count > 1 ? alertController.textFields[1].text : @"";
-            if (profileName.length > 0) {
-                // Use the convenience method to add a profile (does not set custom profileId)
-                [[ProfileManager sharedManager] addProfileWithName:profileName shortDescription:profileDesc];
-
-                // Generate IMEI/MEID if missing for the new profile
-                IdentifierManager *manager = [IdentifierManager sharedManager];
-                if (![manager currentValueForIdentifier:@"IMEI"]) {
-                    NSString *imei = [manager generateIMEI];
-                    if (imei) [manager setCustomIMEI:imei];
-                }
-                if (![manager currentValueForIdentifier:@"MEID"]) {
-                    NSString *meid = [manager generateMEID];
-                    if (meid) [manager setCustomMEID:meid];
-                }
-
-                // Generate Device Model if missing for the new profile
-                if (![manager currentValueForIdentifier:@"DeviceModel"]) {
-                    NSString *deviceModel = [manager generateDeviceModel];
-                    if (deviceModel) {
-                        [manager setCustomDeviceModel:deviceModel];
-                        NSLog(@"[DeviceSpecificSpoofingVC] Generated device model for new profile: %@", deviceModel);
-                    }
-                }
-                
-                // Generate Device Theme if missing for the new profile
-                if (![manager currentValueForIdentifier:@"DeviceTheme"]) {
-                    NSString *deviceTheme = [manager generateDeviceTheme];
-                    if (deviceTheme) {
-                        [manager setCustomDeviceTheme:deviceTheme];
-                        NSLog(@"[DeviceSpecificSpoofingVC] Generated device theme for new profile: %@", deviceTheme);
-                    }
-                }
-                
-                [weakSelf refreshProfileUI]; // Immediately update UI after new profile and identifier generation
-
-            }
-        }];
-        UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil];
-        [alertController addAction:createAction];
-        [alertController addAction:cancelAction];
-        [weakSelf presentViewController:alertController animated:YES completion:nil];
-    };
-    self.profileButtonsView.onManageProfilesTapped = ^{
-        ProfileManagerViewController *profileVC = [[ProfileManagerViewController alloc] initWithProfiles:nil];
-        profileVC.delegate = (id<ProfileManagerViewControllerDelegate>)weakSelf;
-        UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:profileVC];
-        navController.modalPresentationStyle = UIModalPresentationPageSheet;
-        [weakSelf presentViewController:navController animated:YES completion:nil];
-    };
-
-
 
     // --- SCROLLABLE LAYOUT ---
     UIScrollView *scrollView = [[UIScrollView alloc] init];
@@ -174,14 +92,6 @@
         [self.mainStackView.widthAnchor constraintEqualToAnchor:scrollView.frameLayoutGuide.widthAnchor constant:-32],
     ]];
 
-    // Overlay profileButtonsView on the right edge, vertically centered, always visible (not inside scroll view or stack)
-    [self.view addSubview:self.profileButtonsView];
-    [NSLayoutConstraint activateConstraints:@[
-        [self.profileButtonsView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:11],
-        [self.profileButtonsView.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
-        [self.profileButtonsView.widthAnchor constraintEqualToConstant:60],
-        [self.profileButtonsView.heightAnchor constraintEqualToConstant:136],
-    ]];
 }
 
 // Method to add the "Show Advanced" button
@@ -351,27 +261,17 @@
     self.profileIndicatorView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.profileIndicatorView];
 
-    // Add rotated label for profile number
-    self.profileLabel = [[UILabel alloc] init];
-    self.profileLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    self.profileLabel.textColor = [UIColor systemBlueColor];
-    self.profileLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightBold];
-    self.profileLabel.textAlignment = NSTextAlignmentCenter;
-    self.profileLabel.numberOfLines = 0;
+    // Add the rotated ProjectX label.
+    self.appLabel = [[UILabel alloc] init];
+    self.appLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    self.appLabel.textColor = [UIColor systemBlueColor];
+    self.appLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightBold];
+    self.appLabel.textAlignment = NSTextAlignmentCenter;
+    self.appLabel.numberOfLines = 0;
 
-    // Get current profile ID
-    NSString *profileId = @"?";
-    NSDictionary *profileInfo = nil;
-    NSString *centralProfileInfoPath = [[ProfileManager sharedManager] centralProfileInfoPath];
-    if (centralProfileInfoPath) {
-        profileInfo = [NSDictionary dictionaryWithContentsOfFile:centralProfileInfoPath];
-        if (profileInfo && profileInfo[@"ProfileId"]) {
-            profileId = profileInfo[@"ProfileId"];
-        }
-    }
-    self.profileLabel.text = [NSString stringWithFormat:@"\u2190------------------ Profile Num: %@ -----------------\u2192", profileId];
-    self.profileLabel.transform = CGAffineTransformMakeRotation(-M_PI_2);
-    [self.profileIndicatorView addSubview:self.profileLabel];
+    self.appLabel.text = @"\u2190------------------ ProjectX -----------------\u2192";
+    self.appLabel.transform = CGAffineTransformMakeRotation(-M_PI_2);
+    [self.profileIndicatorView addSubview:self.appLabel];
 
     // Pin the indicator to the left edge, vertically centered
     [NSLayoutConstraint activateConstraints:@[
@@ -379,9 +279,9 @@
         [self.profileIndicatorView.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
         [self.profileIndicatorView.widthAnchor constraintEqualToConstant:30],
         [self.profileIndicatorView.heightAnchor constraintEqualToConstant:260],
-        [self.profileLabel.centerXAnchor constraintEqualToAnchor:self.profileIndicatorView.centerXAnchor],
-        [self.profileLabel.centerYAnchor constraintEqualToAnchor:self.profileIndicatorView.centerYAnchor],
-        [self.profileLabel.widthAnchor constraintLessThanOrEqualToConstant:UIScreen.mainScreen.bounds.size.height - 48]
+        [self.appLabel.centerXAnchor constraintEqualToAnchor:self.profileIndicatorView.centerXAnchor],
+        [self.appLabel.centerYAnchor constraintEqualToAnchor:self.profileIndicatorView.centerYAnchor],
+        [self.appLabel.widthAnchor constraintLessThanOrEqualToConstant:UIScreen.mainScreen.bounds.size.height - 48]
     ]];
 }
 
@@ -728,18 +628,8 @@
 
 // MARK: - Profile/Identifier UI Refresh
 - (void)refreshProfileUI {
-    // Update profile label
-    NSString *profileId = @"?";
-    NSDictionary *profileInfo = nil;
-    NSString *centralProfileInfoPath = [[ProfileManager sharedManager] centralProfileInfoPath];
-    if (centralProfileInfoPath) {
-        profileInfo = [NSDictionary dictionaryWithContentsOfFile:centralProfileInfoPath];
-        if (profileInfo && profileInfo[@"ProfileId"]) {
-            profileId = profileInfo[@"ProfileId"];
-        }
-    }
-    if (self.profileLabel) {
-        self.profileLabel.text = [NSString stringWithFormat:@"←------------------ Profile Num: %@ -----------------→", profileId];
+    if (self.appLabel) {
+        self.appLabel.text = @"←------------------ ProjectX -----------------→";
     }
     
     // Update IMEI/MEID labels
@@ -851,11 +741,10 @@
     [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
         NSString *newValue = alert.textFields.firstObject.text;
         if (newValue.length > 0 && ![newValue isEqualToString:currentValue]) {
-            if ([key isEqualToString:@"IMEI"]) {
-                [[IdentifierManager sharedManager] setCustomIMEI:newValue];
-            } else if ([key isEqualToString:@"MEID"]) {
-                [[IdentifierManager sharedManager] setCustomMEID:newValue];
-            }
+            BOOL saved = [key isEqualToString:@"IMEI"]
+                ? [[IdentifierManager sharedManager] setCustomIMEI:newValue]
+                : [[IdentifierManager sharedManager] setCustomMEID:newValue];
+            if (!saved) return;
             // Find the card and update the value label
             UIView *targetCard = (sender.tag == 1) ? weakSelf.imeiCard : weakSelf.meidCard;
             for (UIView *sub in targetCard.subviews) {
@@ -996,19 +885,13 @@
     NSString *newValue = nil;
     if ([key isEqualToString:@"IMEI"]) {
         newValue = [[IdentifierManager sharedManager] generateIMEI];
-        if (newValue) {
-            [[IdentifierManager sharedManager] setCustomIMEI:newValue];
-        }
+        if (newValue && ![[IdentifierManager sharedManager] setCustomIMEI:newValue]) newValue = nil;
     } else if ([key isEqualToString:@"MEID"]) {
         newValue = [[IdentifierManager sharedManager] generateMEID];
-        if (newValue) {
-            [[IdentifierManager sharedManager] setCustomMEID:newValue];
-        }
+        if (newValue && ![[IdentifierManager sharedManager] setCustomMEID:newValue]) newValue = nil;
     } else if ([key isEqualToString:@"DeviceModel"]) {
         newValue = [[IdentifierManager sharedManager] generateDeviceModel];
         if (newValue) {
-            [[IdentifierManager sharedManager] setCustomDeviceModel:newValue];
-            
             // Get detailed device specifications
             [self showDeviceSpecificationsForModel:newValue];
         }

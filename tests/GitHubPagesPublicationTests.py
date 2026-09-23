@@ -95,7 +95,7 @@ class GitHubPagesPublicationTests(unittest.TestCase):
             )
 
             self.assertEqual(metadata["version"], "9.9.9")
-            self.assertEqual(metadata["source_url"], "https://gitssie.github.io/ProjectX/")
+            self.assertEqual(metadata["source_url"], "https://gitssie.github.io/ProjectX")
             self.assertEqual((repository / "Release").read_bytes(), original_release)
             self.assertEqual((output / "pool" / package.name).read_bytes(), package.read_bytes())
             self.assertTrue((output / ".nojekyll").is_file())
@@ -113,7 +113,8 @@ class GitHubPagesPublicationTests(unittest.TestCase):
 
             page = (output / "index.html").read_text(encoding="utf-8")
             self.assertNotRegex(page, r"\{\{[A-Z0-9_]+\}\}")
-            self.assertIn("sileo://source/https://gitssie.github.io/ProjectX/", page)
+            self.assertIn('href="sileo://source/https://gitssie.github.io/ProjectX"', page)
+            self.assertIn('<code id="source-url">https://gitssie.github.io/ProjectX</code>', page)
             self.assertIn("prefers-reduced-motion", page)
             self.assertIn("9.9.9", page)
 
@@ -125,6 +126,11 @@ class GitHubPagesPublicationTests(unittest.TestCase):
             )
             self.assertEqual(depiction["tintColor"], "#3167F5")
             self.assertIn("9.9.9", depiction["tabs"][0]["views"][0]["markdown"])
+            self.assertIn(
+                "https://gitssie.github.io/ProjectX",
+                json.dumps(depiction),
+            )
+            self.assertNotIn("sileo://source/https://gitssie.github.io/ProjectX/", json.dumps(depiction))
             renderer.validate_repository(output, "https://gitssie.github.io/ProjectX/")
             renderer.validate_depiction(depiction)
 
