@@ -27,11 +27,9 @@
 @property (nonatomic, strong) UILabel *sourceLabel;
 @property (nonatomic, strong) UILabel *mismatchLabel;
 @property (nonatomic, strong) UIView *mismatchRow;
-@property (nonatomic, strong) UIView *clearSeparator;
 @property (nonatomic, strong) UIStackView *actionStack;
 @property (nonatomic, strong) UIButton *refreshButton;
 @property (nonatomic, strong) UIButton *clearLocationButton;
-@property (nonatomic, strong) UIButton *useLocationButton;
 @property (nonatomic, strong) PXGeoIPLocationService *locationService;
 @property (nonatomic, strong) NSURLSessionDataTask *activeRequest;
 @property (nonatomic, copy) NSArray<NSURLSessionDataTask *> *activeAddressRequests;
@@ -249,34 +247,20 @@
             forControlEvents:UIControlEventTouchUpInside];
     self.refreshButton = refreshButton;
 
-    UIButton *useLocationButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    useLocationButton.translatesAutoresizingMaskIntoConstraints = NO;
-    useLocationButton.accessibilityIdentifier = @"image-location-use";
-    [useLocationButton addTarget:self action:@selector(handleUseLocationTapped:)
-                forControlEvents:UIControlEventTouchUpInside];
-    self.useLocationButton = useLocationButton;
-
-    self.actionStack = [[UIStackView alloc]
-        initWithArrangedSubviews:@[refreshButton, useLocationButton]];
-    self.actionStack.axis = UILayoutConstraintAxisHorizontal;
-    self.actionStack.alignment = UIStackViewAlignmentFill;
-    self.actionStack.spacing = 8.0;
-    [refreshButton setContentHuggingPriority:UILayoutPriorityRequired
-                                    forAxis:UILayoutConstraintAxisHorizontal];
-    [cardStack addArrangedSubview:self.actionStack];
-    [cardStack setCustomSpacing:16.0 afterView:self.actionStack];
-
-    self.clearSeparator = [self dividerView];
-    [cardStack addArrangedSubview:self.clearSeparator];
-
     UIButton *clearButton = [UIButton buttonWithType:UIButtonTypeSystem];
     clearButton.translatesAutoresizingMaskIntoConstraints = NO;
     clearButton.accessibilityIdentifier = @"image-location-clear-saved";
     [clearButton addTarget:self action:@selector(handleClearLocationTapped:)
           forControlEvents:UIControlEventTouchUpInside];
     self.clearLocationButton = clearButton;
-    [cardStack addArrangedSubview:clearButton];
-    [self updateActionLayout];
+
+    self.actionStack = [[UIStackView alloc]
+        initWithArrangedSubviews:@[refreshButton, clearButton]];
+    self.actionStack.axis = UILayoutConstraintAxisHorizontal;
+    self.actionStack.alignment = UIStackViewAlignmentFill;
+    self.actionStack.distribution = UIStackViewDistributionFillEqually;
+    self.actionStack.spacing = 8.0;
+    [cardStack addArrangedSubview:self.actionStack];
 
     [NSLayoutConstraint activateConstraints:@[
         [scrollView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
@@ -292,29 +276,8 @@
         [cardStack.trailingAnchor constraintEqualToAnchor:resultCard.trailingAnchor constant:-18.0],
         [cardStack.bottomAnchor constraintEqualToAnchor:resultCard.bottomAnchor constant:-12.0],
         [refreshButton.heightAnchor constraintGreaterThanOrEqualToConstant:48.0],
-        [useLocationButton.heightAnchor constraintGreaterThanOrEqualToConstant:48.0],
-        [clearButton.heightAnchor constraintGreaterThanOrEqualToConstant:44.0]
+        [clearButton.heightAnchor constraintGreaterThanOrEqualToConstant:48.0]
     ]];
-}
-
-- (void)updateActionLayout {
-    CGFloat bodyPointSize = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleBody]
-        scaledValueForValue:17.0 compatibleWithTraitCollection:self.traitCollection];
-    self.actionStack.axis = (self.view.bounds.size.width < 390.0 || bodyPointSize > 19.0)
-        ? UILayoutConstraintAxisVertical : UILayoutConstraintAxisHorizontal;
-}
-
-- (void)viewDidLayoutSubviews {
-    [super viewDidLayoutSubviews];
-    [self updateActionLayout];
-}
-
-- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
-    [super traitCollectionDidChange:previousTraitCollection];
-    if (![previousTraitCollection.preferredContentSizeCategory
-          isEqualToString:self.traitCollection.preferredContentSizeCategory]) {
-        [self updateActionLayout];
-    }
 }
 
 - (void)handleLanguagePreferenceChanged:(NSNotification *)notification {
@@ -357,22 +320,9 @@
     clearConfiguration.baseForegroundColor = UIColor.systemRedColor;
     clearConfiguration.contentInsets = NSDirectionalEdgeInsetsMake(8.0, 4.0, 8.0, 4.0);
     self.clearLocationButton.configuration = clearConfiguration;
-    self.clearLocationButton.hidden = !self.hasStoredLocationConfiguration;
-    self.clearSeparator.hidden = !self.hasStoredLocationConfiguration;
+    self.clearLocationButton.enabled = self.hasStoredLocationConfiguration && !self.loading;
     self.clearLocationButton.accessibilityLabel = PXLocalizedString(@"image.location.clear.accessibility_label");
     self.clearLocationButton.accessibilityHint = PXLocalizedString(@"image.location.clear.accessibility_hint");
-
-    UIButtonConfiguration *useConfiguration = [UIButtonConfiguration filledButtonConfiguration];
-    useConfiguration.title = PXLocalizedString(self.selectedLocationPolicy
-        ? @"image.location.selected.title" : @"image.location.use.title");
-    useConfiguration.cornerStyle = UIButtonConfigurationCornerStyleLarge;
-    useConfiguration.baseBackgroundColor = UIColor.systemBlueColor;
-    useConfiguration.baseForegroundColor = UIColor.whiteColor;
-    self.useLocationButton.configuration = useConfiguration;
-    self.useLocationButton.enabled = self.displayedLocation != nil &&
-        self.currentDetectionSucceeded && !self.loading;
-    self.useLocationButton.accessibilityLabel = PXLocalizedString(@"image.location.use.accessibility_label");
-    self.useLocationButton.accessibilityHint = PXLocalizedString(@"image.location.use.accessibility_hint");
     [self updateConfirmButtonState];
     [self renderLocationState];
 }
@@ -516,6 +466,12 @@
     self.loading = NO;
     self.requestFailed = self.displayedLocation == nil;
     self.currentDetectionSucceeded = self.displayedLocation != nil;
+    if (self.currentDetectionSucceeded) {
+        self.selectedLocationPolicy = [self.displayedLocation
+            policyRepresentationWithIPv4Address:self.detectedIPv4Address
+                                  ipv6Address:self.detectedIPv6Address];
+        self.pendingClear = NO;
+    }
     [self refreshLocalizedContent];
     NSString *announcement = self.displayedLocation
         ? PXLocalizedFormat(@"image.location.geo_ip.ready.announcement", self.displayedLocation.address)
@@ -532,21 +488,16 @@
 
 - (void)handleClearLocationTapped:(UIButton *)sender {
     (void)sender;
+    if (self.loading) return;
     self.pendingClear = YES;
     self.selectedLocationPolicy = nil;
     self.hasStoredLocationConfiguration = NO;
     self.savedGeoIPLocation = nil;
+    self.displayedLocation = nil;
+    self.currentDetectionSucceeded = NO;
+    self.detectedIPv4Address = nil;
+    self.detectedIPv6Address = nil;
     self.legacyLocationAddress = nil;
-    [self refreshLocalizedContent];
-}
-
-- (void)handleUseLocationTapped:(UIButton *)sender {
-    (void)sender;
-    if (!self.displayedLocation || !self.currentDetectionSucceeded || self.loading) return;
-    self.selectedLocationPolicy = [self.displayedLocation
-        policyRepresentationWithIPv4Address:self.detectedIPv4Address
-                              ipv6Address:self.detectedIPv6Address];
-    self.pendingClear = NO;
     [self refreshLocalizedContent];
 }
 

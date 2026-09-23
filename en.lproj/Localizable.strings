@@ -5,6 +5,7 @@
 "navigation.close" = "Close";
 "navigation.done" = "Done";
 "navigation.ok" = "OK";
+"image.search.exit.accessibility_label" = "Exit search";
 
 "home.settings.title" = "Settings";
 "home.settings.accessibility_label" = "Settings";
@@ -227,6 +228,7 @@
 "image.home.device.title" = "This device";
 "image.home.device.summary" = "%@ · iOS %@";
 "image.home.device.unknown" = "Unknown";
+"image.home.device.storage" = "Storage %@";
 "image.home.device.model" = "Device model";
 "image.home.device.system" = "System version";
 "image.home.device.identifier" = "Hardware model";
@@ -320,13 +322,13 @@
 "image.model.available_count" = "%ld available models";
 "image.model.catalog.footer" = "%ld catalog models. %@";
 "image.model.complete_identity.footer" = "Compatible variants are inferred from this device's immutable hardware. A matching GPU name alone does not make a model selectable.";
-"image.model.complete_identity.detail" = "ID %@ · CPU %@\nGPU %@ · Metal %@\nDisplay %@ · Storage %@ GB";
+"image.model.complete_identity.detail" = "%@ · CPU %@\nGPU %@ · Metal %@\n%@ · %@ GB";
 "image.model.selection_hint" = "Double tap to select this complete model identity, then tap Confirm to save.";
 "image.model.selected_announcement" = "Environment model selected. Tap Confirm to save.";
 "image.model.other_group" = "Other models";
 "image.model.use_this_device.section" = "Recommended";
 "image.model.use_this_device.title" = "Use This Device";
-"image.model.use_this_device.detail" = "%@ (%@)\nDetected %@ · %@";
+"image.model.use_this_device.detail" = "%@ (%@)\n%@ · %@";
 "image.model.use_this_device.summary" = "Use This Device — %@";
 "image.model.use_this_device.selection_hint" = "Double tap to select the physical device model, then tap Confirm to save.";
 "image.model.use_this_device.selected_announcement" = "The physical device model is selected for the next environment.";
@@ -355,7 +357,7 @@
 "image.network.unspecified" = "Not configured";
 "image.network.wifi" = "Wi-Fi";
 "image.network.5g" = "5G";
-"image.network.4g" = "4G (LTE)";
+"image.network.4g" = "4G";
 "image.network.3g" = "3G";
 "image.network.2g" = "2G";
 "image.network.none" = "No network";
@@ -391,9 +393,9 @@
 "image.location.geo_ip.explanation" = "Detects the current network exit region without loading a map or requesting Location Services permission.";
 "image.location.geo_ip.source" = "Network location is approximate";
 "image.location.geo_ip.detecting" = "Detecting…";
-"image.location.geo_ip.detect" = "Detect location";
+"image.location.geo_ip.detect" = "Detect";
 "image.location.geo_ip.detect.accessibility_label" = "Detect GEO IP location";
-"image.location.geo_ip.refresh" = "Detect again";
+"image.location.geo_ip.refresh" = "Refresh";
 "image.location.geo_ip.refresh.accessibility_label" = "Detect GEO IP location again";
 "image.location.geo_ip.refresh.accessibility_hint" = "Uses the current network address to refresh the approximate location.";
 "image.location.geo_ip.status.detecting" = "Detecting the current network location…";
@@ -412,15 +414,10 @@
 "image.location.geo_ip.failed.announcement" = "GEO IP location could not be detected.";
 "image.location.address.cleared" = "No location selected";
 "image.location.mismatch.warning" = "Location differs from carrier region";
-"image.location.clear.title" = "Clear saved location";
+"image.location.clear.title" = "Clear";
 "image.location.clear.accessibility_label" = "Clear saved location";
 "image.location.clear.accessibility_hint" = "Select removal of the saved location, then tap Confirm.";
 "image.location.clear.announcement" = "Smart location cleared.";
-"image.location.use.title" = "Select this location";
-"image.location.selected.title" = "Location selected";
-"image.location.use.accessibility_label" = "Select this location";
-"image.location.use.accessibility_hint" = "Select the detected GEO IP location, then tap Confirm.";
-"image.location.use.announcement" = "Smart location saved for the next environment.";
 
 "language.title" = "Language";
 "language.accessibility.list" = "XenSpace interface language options";

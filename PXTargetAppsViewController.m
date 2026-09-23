@@ -4,6 +4,7 @@
 #import "IdentifierManager.h"
 #import "ProjectXLogging.h"
 #import "PXLocalizedStrings.h"
+#import "PXSearchExitButton.h"
 #import "PXTargetAppEligibility.h"
 #import "PXTargetSelectionServices.h"
 
@@ -29,10 +30,11 @@ typedef NS_ENUM(NSInteger, PXTargetAppsViewState) {
 @implementation PXTargetApp
 @end
 
-@interface PXTargetAppsViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating>
+@interface PXTargetAppsViewController () <UITableViewDataSource, UITableViewDelegate, UISearchResultsUpdating, UISearchControllerDelegate>
 
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UISearchController *searchController;
+@property (nonatomic, strong) UIButton *searchExitButton;
 @property (nonatomic, copy) NSArray<PXTargetApp *> *allApps;
 @property (nonatomic, copy) NSArray<PXTargetApp *> *visibleUserApps;
 @property (nonatomic, copy) NSArray<PXTargetApp *> *visibleSystemApps;
@@ -122,6 +124,7 @@ typedef NS_ENUM(NSInteger, PXTargetAppsViewState) {
     self.tableView.accessibilityLabel = PXLocalizedString(@"image.target_apps.accessibility.list");
     self.searchController.searchBar.placeholder = PXLocalizedString(@"image.target_apps.search.placeholder");
     self.searchController.searchBar.accessibilityLabel = PXLocalizedString(@"image.target_apps.search.accessibility_label");
+    self.searchExitButton.accessibilityLabel = PXLocalizedString(@"image.search.exit.accessibility_label");
     [self refreshSafariReadiness];
     [self.tableView reloadData];
     if (self.view.window) {
@@ -153,11 +156,15 @@ typedef NS_ENUM(NSInteger, PXTargetAppsViewState) {
 - (void)configureSearch {
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
+    self.searchController.delegate = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.searchController.automaticallyShowsCancelButton = NO;
     self.searchController.searchBar.placeholder = PXLocalizedString(@"image.target_apps.search.placeholder");
     self.searchController.searchBar.accessibilityLabel = PXLocalizedString(@"image.target_apps.search.accessibility_label");
     self.searchController.searchBar.accessibilityIdentifier = @"image-target-apps-search";
+    self.searchExitButton = PXInstallSearchExitButton(self.searchController, self, @selector(handleSearchExitTapped:));
+    self.searchExitButton.accessibilityIdentifier = @"image-target-apps-search-exit";
+    self.searchExitButton.accessibilityLabel = PXLocalizedString(@"image.search.exit.accessibility_label");
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.definesPresentationContext = YES;
@@ -281,6 +288,26 @@ typedef NS_ENUM(NSInteger, PXTargetAppsViewState) {
         return;
     }
     [self rebuildVisibleApps];
+}
+
+- (void)willPresentSearchController:(UISearchController *)searchController {
+    (void)searchController;
+    self.searchExitButton.hidden = NO;
+}
+
+- (void)handleSearchExitTapped:(UIButton *)sender {
+    (void)sender;
+    self.searchController.active = NO;
+}
+
+- (void)didDismissSearchController:(UISearchController *)searchController {
+    (void)searchController;
+    self.searchExitButton.hidden = YES;
+    self.searchController.searchBar.text = @"";
+    if (self.viewState != PXTargetAppsViewStateLoading &&
+        self.viewState != PXTargetAppsViewStateEnumerationFailure) {
+        [self rebuildVisibleApps];
+    }
 }
 
 - (void)rebuildVisibleApps {

@@ -20,7 +20,9 @@ def test_device_information_excludes_unique_identifiers() -> None:
     for forbidden in ("identifierForVendor", "advertisingIdentifier", "serialNumber", "UDID"):
         assert forbidden not in body
     assert 'content.text = modelName.length > 0 ? modelName : unknown;' in body
-    assert 'content.secondaryText = [NSString stringWithFormat:@"%@ · %@ · %@"' in body
+    assert 'NSString *details = [NSString stringWithFormat:@"%@ · %@ · %@"' in body
+    assert 'PXLocalizedFormat(@"image.home.device.storage", storageSize)' in body
+    assert 'content.secondaryText = details;' in body
     assert 'content.secondaryTextProperties.numberOfLines = 0;' in body
     assert '? record[@"name"] : modelIdentifier' in body
     assert '? record[@"cpuArchitecture"] : unknown' in body

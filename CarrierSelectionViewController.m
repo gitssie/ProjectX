@@ -2,6 +2,7 @@
 #import "CarrierSelectionViewController.h"
 
 #import "PXLocalizedStrings.h"
+#import "PXSearchExitButton.h"
 
 @implementation PXTrustedCarrierOption
 - (instancetype)initWithStableIdentifier:(NSString *)stableIdentifier countryName:(NSString *)countryName carrierName:(NSString *)carrierName {
@@ -14,6 +15,7 @@
 @interface CarrierSelectionViewController ()
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, strong) UISearchController *searchController;
+@property (nonatomic, strong) UIButton *searchExitButton;
 @property (nonatomic, strong) UIBarButtonItem *confirmButton;
 @property (nonatomic, copy) NSArray<NSString *> *visibleCountries;
 @property (nonatomic, copy) NSDictionary<NSString *, NSArray<PXTrustedCarrierOption *> *> *visibleOptions;
@@ -58,6 +60,7 @@
     self.title = PXLocalizedString(@"image.carrier.title");
     self.searchController.searchBar.placeholder = PXLocalizedString(@"image.carrier.search.placeholder");
     self.searchController.searchBar.accessibilityLabel = PXLocalizedString(@"image.carrier.search.accessibility_label");
+    self.searchExitButton.accessibilityLabel = PXLocalizedString(@"image.search.exit.accessibility_label");
     self.tableView.accessibilityLabel = PXLocalizedString(@"image.carrier.accessibility.list");
     if (!self.usesPushNavigation) {
         self.navigationItem.leftBarButtonItem.accessibilityLabel = PXLocalizedString(@"carrier.cancel.accessibility_label");
@@ -87,9 +90,12 @@
     self.searchController.searchResultsUpdater = self;
     self.searchController.delegate = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
-    if (self.usesPushNavigation) self.searchController.automaticallyShowsCancelButton = NO;
+    self.searchController.automaticallyShowsCancelButton = NO;
     self.searchController.searchBar.placeholder = PXLocalizedString(@"image.carrier.search.placeholder");
     self.searchController.searchBar.accessibilityLabel = PXLocalizedString(@"image.carrier.search.accessibility_label");
+    self.searchExitButton = PXInstallSearchExitButton(self.searchController, self, @selector(handleSearchExitTapped:));
+    self.searchExitButton.accessibilityIdentifier = @"image-carrier-search-exit";
+    self.searchExitButton.accessibilityLabel = PXLocalizedString(@"image.search.exit.accessibility_label");
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.definesPresentationContext = YES;
@@ -136,8 +142,21 @@
 
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController { [self rebuildVisibleOptions]; }
 
+- (void)willPresentSearchController:(UISearchController *)searchController {
+    (void)searchController;
+    self.searchExitButton.hidden = NO;
+}
+
+- (void)handleSearchExitTapped:(UIButton *)sender {
+    (void)sender;
+    self.searchController.active = NO;
+}
+
 - (void)didDismissSearchController:(UISearchController *)searchController {
     (void)searchController;
+    self.searchExitButton.hidden = YES;
+    self.searchController.searchBar.text = @"";
+    [self rebuildVisibleOptions];
     if (!self.confirmAfterSearchDismissal) { return; }
     self.confirmAfterSearchDismissal = NO;
     [self commitSelectedCarrier];

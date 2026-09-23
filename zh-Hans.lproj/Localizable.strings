@@ -5,6 +5,7 @@
 "navigation.close" = "关闭";
 "navigation.done" = "完成";
 "navigation.ok" = "好";
+"image.search.exit.accessibility_label" = "退出搜索";
 
 "home.settings.title" = "设置";
 "home.settings.accessibility_label" = "设置";
@@ -227,6 +228,7 @@
 "image.home.device.title" = "本机信息";
 "image.home.device.summary" = "%@ · iOS %@";
 "image.home.device.unknown" = "未知";
+"image.home.device.storage" = "存储容量 %@";
 "image.home.device.model" = "设备型号";
 "image.home.device.system" = "系统版本";
 "image.home.device.identifier" = "硬件型号";
@@ -320,13 +322,13 @@
 "image.model.available_count" = "%ld 个可用型号";
 "image.model.catalog.footer" = "%ld 个目录型号。%@";
 "image.model.complete_identity.footer" = "兼容的变体由此设备不可变的硬件特征推断。仅 GPU 名称相同并不代表该型号可选。";
-"image.model.complete_identity.detail" = "标识符 %@ · CPU %@\nGPU %@ · Metal %@\n显示 %@ · 存储 %@ GB";
+"image.model.complete_identity.detail" = "%@ · CPU %@\nGPU %@ · Metal %@\n%@ · %@ GB";
 "image.model.selection_hint" = "轻点两下选择此完整型号身份，然后点击右上角确认保存。";
 "image.model.selected_announcement" = "已选择环境型号。点击确认后保存。";
 "image.model.other_group" = "其他型号";
 "image.model.use_this_device.section" = "推荐";
 "image.model.use_this_device.title" = "使用本机";
-"image.model.use_this_device.detail" = "%@（%@）\n已检测 %@ · %@";
+"image.model.use_this_device.detail" = "%@（%@）\n%@ · %@";
 "image.model.use_this_device.summary" = "使用本机 — %@";
 "image.model.use_this_device.selection_hint" = "轻点两下选择本机型号，然后点击右上角确认保存。";
 "image.model.use_this_device.selected_announcement" = "已为下一个环境选择本机型号。";
@@ -355,7 +357,7 @@
 "image.network.unspecified" = "未配置";
 "image.network.wifi" = "Wi-Fi";
 "image.network.5g" = "5G";
-"image.network.4g" = "4G（LTE）";
+"image.network.4g" = "4G";
 "image.network.3g" = "3G";
 "image.network.2g" = "2G";
 "image.network.none" = "无网络";
@@ -412,15 +414,10 @@
 "image.location.geo_ip.failed.announcement" = "无法检测 GEO IP 位置。";
 "image.location.address.cleared" = "未选择位置";
 "image.location.mismatch.warning" = "位置与运营商地区不一致";
-"image.location.clear.title" = "清除已保存位置";
+"image.location.clear.title" = "清除位置";
 "image.location.clear.accessibility_label" = "清除已保存位置";
 "image.location.clear.accessibility_hint" = "选择清除已保存位置，然后点击右上角确认。";
 "image.location.clear.announcement" = "智能位置已清除。";
-"image.location.use.title" = "选择此位置";
-"image.location.selected.title" = "已选择此位置";
-"image.location.use.accessibility_label" = "选择此位置";
-"image.location.use.accessibility_hint" = "选择检测到的 GEO IP 位置，然后点击右上角确认。";
-"image.location.use.announcement" = "智能位置已保存到下一个环境。";
 
 "language.title" = "语言";
 "language.accessibility.list" = "XenSpace 界面语言选项";

@@ -10,6 +10,7 @@
 #import "PXEnvironmentPolicy.h"
 #import "PXLanguageSelectionViewController.h"
 #import "PXLocalizedStrings.h"
+#import "PXSearchExitButton.h"
 #import "PXRootHidePath.h"
 #import "PXSmartLocationViewController.h"
 #import "PXTargetAppsViewController.h"
@@ -95,7 +96,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     didConfirmNetworkTypes:(NSSet<NSNumber *> *)networkTypes;
 @end
 
-@interface PXEnvironmentModelSelectorViewController : UITableViewController <UISearchResultsUpdating>
+@interface PXEnvironmentModelSelectorViewController : UITableViewController <UISearchResultsUpdating, UISearchControllerDelegate>
 @property (nonatomic, weak) id<PXEnvironmentModelSelectorDelegate> delegate;
 - (instancetype)initWithModelRecords:(NSArray<NSDictionary<NSString *, id> *> *)records
                   physicalModelRecord:(NSDictionary<NSString *, id> *)physicalModelRecord
@@ -580,6 +581,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 @property (nonatomic, copy) NSDictionary<NSString *, NSArray<NSDictionary<NSString *, id> *> *> *recordsByGroup;
 @property (nonatomic, copy, nullable) NSString *selectedIdentifier;
 @property (nonatomic, strong) UISearchController *searchController;
+@property (nonatomic, strong) UIButton *searchExitButton;
 @property (nonatomic, copy) NSDictionary<NSString *, id> *physicalModelRecord;
 @property (nonatomic, copy) NSDictionary<NSString *, NSDictionary<NSString *, id> *> *compatibilityPresentationByIdentifier;
 @property (nonatomic, assign) BOOL usesPhysicalDevice;
@@ -632,11 +634,15 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     self.tableView.accessibilityLabel = PXLocalizedString(@"image.model.accessibility.list");
     self.searchController = [[UISearchController alloc] initWithSearchResultsController:nil];
     self.searchController.searchResultsUpdater = self;
+    self.searchController.delegate = self;
     self.searchController.obscuresBackgroundDuringPresentation = NO;
     self.searchController.automaticallyShowsCancelButton = NO;
     self.searchController.searchBar.placeholder = PXLocalizedString(@"image.model.search.placeholder");
     self.searchController.searchBar.accessibilityLabel = PXLocalizedString(@"image.model.search.accessibility_label");
     self.searchController.searchBar.accessibilityIdentifier = @"image-model-search";
+    self.searchExitButton = PXInstallSearchExitButton(self.searchController, self, @selector(handleSearchExitTapped:));
+    self.searchExitButton.accessibilityIdentifier = @"image-model-search-exit";
+    self.searchExitButton.accessibilityLabel = PXLocalizedString(@"image.search.exit.accessibility_label");
     self.navigationItem.searchController = self.searchController;
     self.navigationItem.hidesSearchBarWhenScrolling = NO;
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
@@ -665,6 +671,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     self.tableView.accessibilityLabel = PXLocalizedString(@"image.model.accessibility.list");
     self.searchController.searchBar.placeholder = PXLocalizedString(@"image.model.search.placeholder");
     self.searchController.searchBar.accessibilityLabel = PXLocalizedString(@"image.model.search.accessibility_label");
+    self.searchExitButton.accessibilityLabel = PXLocalizedString(@"image.search.exit.accessibility_label");
     self.navigationItem.rightBarButtonItem.title = PXLocalizedString(@"image.network.confirm.title");
     [self rebuildVisibleRecordsForQuery:self.searchController.searchBar.text ?: @""];
     if (self.view.window) {
@@ -675,6 +682,23 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 - (void)updateSearchResultsForSearchController:(UISearchController *)searchController {
     NSString *query = [searchController.searchBar.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     [self rebuildVisibleRecordsForQuery:query];
+}
+
+- (void)willPresentSearchController:(UISearchController *)searchController {
+    (void)searchController;
+    self.searchExitButton.hidden = NO;
+}
+
+- (void)handleSearchExitTapped:(UIButton *)sender {
+    (void)sender;
+    self.searchController.active = NO;
+}
+
+- (void)didDismissSearchController:(UISearchController *)searchController {
+    (void)searchController;
+    self.searchExitButton.hidden = YES;
+    self.searchController.searchBar.text = @"";
+    [self rebuildVisibleRecordsForQuery:@""];
 }
 
 - (void)updateConfirmButtonState {

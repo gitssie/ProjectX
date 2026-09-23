@@ -15,6 +15,7 @@
 #import "PXEnvironmentFailureDetailsViewController.h"
 #import "PXLocalizedStrings.h"
 #import "PXProjectXEnvironmentOperations.h"
+#import "PXRootHidePath.h"
 #import "PXSettingsHubViewController.h"
 #import "PXSmartLocationViewController.h"
 #import "PXTargetAppsViewController.h"
@@ -69,6 +70,7 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
 @property (nonatomic, strong) PXEnvironmentPolicyStore *environmentPolicyStore;
 @property (nonatomic, strong) PXProjectXEnvironmentOperations *environmentOperations;
 @property (nonatomic, strong) PXAutomaticEnvironmentCoordinator *environmentCoordinator;
+@property (nonatomic, strong, nullable) NSNumber *physicalStorageSize;
 @property (nonatomic, strong, nullable) PXEnvironmentFailureReport *lastFailureReport;
 @property (nonatomic, strong, nullable) UIAlertController *pendingAlert;
 @property (nonatomic, assign) BOOL cleanupInProgress;
@@ -89,6 +91,9 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
     [self configureTableView];
     [self configureInitialSummary];
     self.environmentPolicyStore = [PXEnvironmentPolicyStore sharedStore];
+    NSDictionary<NSFileAttributeKey, id> *storageAttributes =
+        [NSFileManager.defaultManager attributesOfFileSystemForPath:PXRootFSPath(@"/var/mobile") error:nil];
+    self.physicalStorageSize = storageAttributes[NSFileSystemSize];
     self.environmentOperations = [PXProjectXEnvironmentOperations sharedOperations];
     PXTargetSelectionServices *targetSelectionServices = [PXTargetSelectionServices sharedServices];
     self.environmentCoordinator = [[PXAutomaticEnvironmentCoordinator alloc]
@@ -146,6 +151,7 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
 }
 
 - (void)configureNavigation {
+    self.navigationItem.backButtonTitle = PXLocalizedString(@"navigation.back");
     UIBarButtonItem *settings = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"gearshape"] style:UIBarButtonItemStylePlain target:self action:@selector(handleSettingsTapped:)];
     settings.accessibilityIdentifier = @"image-home-settings";
     settings.accessibilityLabel = PXLocalizedString(@"image.home.settings.accessibility_label");
@@ -504,10 +510,18 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
         ? [@"iOS " stringByAppendingString:UIDevice.currentDevice.systemVersion]
         : unknown;
     content.text = modelName.length > 0 ? modelName : unknown;
-    content.secondaryText = [NSString stringWithFormat:@"%@ · %@ · %@",
+    NSString *details = [NSString stringWithFormat:@"%@ · %@ · %@",
         systemVersion,
         modelIdentifier.length > 0 ? modelIdentifier : unknown,
         processor.length > 0 ? processor : unknown];
+    if (self.physicalStorageSize.unsignedLongLongValue > 0) {
+        NSString *storageSize = [NSByteCountFormatter
+            stringFromByteCount:self.physicalStorageSize.longLongValue
+                     countStyle:NSByteCountFormatterCountStyleDecimal];
+        details = [details stringByAppendingFormat:@" · %@",
+            PXLocalizedFormat(@"image.home.device.storage", storageSize)];
+    }
+    content.secondaryText = details;
     content.secondaryTextProperties.numberOfLines = 0;
     content.image = [UIImage systemImageNamed:@"iphone"];
 }

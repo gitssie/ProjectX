@@ -41,7 +41,7 @@ def test_geo_ip_request_is_private_and_bounded() -> None:
 def test_ui_has_loading_retry_and_confirm_states() -> None:
     assert "showsActivityIndicator = self.loading" in CONTROLLER
     assert "self.refreshButton.enabled = !self.loading" in CONTROLLER
-    assert "self.currentDetectionSucceeded && !self.loading" in CONTROLLER
+    assert "if (self.currentDetectionSucceeded)" in CONTROLLER
     assert "image.location.geo_ip.status.failed" in CONTROLLER
     assert "saveConfiguredLocation" in CONTROLLER
     assert "self.requestRevision != revision" in CONTROLLER
@@ -75,24 +75,24 @@ def test_saved_ip_addresses_are_rendered_without_detection() -> None:
     )[0]
     assert "self.savedGeoIPLocation.ipv4Address" in render_handler
     assert "self.savedGeoIPLocation.ipv6Address" in render_handler
-    use_handler = CONTROLLER.split("- (void)handleUseLocationTapped:", 1)[1].split(
-        "- (void)restoreConfiguredLocation {", 1
+    detection_handler = CONTROLLER.split("- (void)finishDetectionIfReadyForRevision:", 1)[1].split(
+        "- (void)handleRefreshTapped:", 1
     )[0]
-    assert "policyRepresentationWithIPv4Address:self.detectedIPv4Address" in use_handler
-    assert "ipv6Address:self.detectedIPv6Address" in use_handler
+    assert "policyRepresentationWithIPv4Address:self.detectedIPv4Address" in detection_handler
+    assert "ipv6Address:self.detectedIPv6Address" in detection_handler
 
 
 def test_location_changes_commit_only_after_confirmation() -> None:
-    use_handler = CONTROLLER.split("- (void)handleUseLocationTapped:", 1)[1].split(
-        "- (void)handleConfirmTapped:", 1
+    detection_handler = CONTROLLER.split("- (void)finishDetectionIfReadyForRevision:", 1)[1].split(
+        "- (void)handleRefreshTapped:", 1
     )[0]
     clear_handler = CONTROLLER.split("- (void)handleClearLocationTapped:", 1)[1].split(
-        "- (void)handleUseLocationTapped:", 1
+        "- (void)handleConfirmTapped:", 1
     )[0]
     confirm_handler = CONTROLLER.split("- (void)handleConfirmTapped:", 1)[1].split(
         "- (void)restoreConfiguredLocation {", 1
     )[0]
-    assert "saveConfiguredLocation" not in use_handler
+    assert "saveConfiguredLocation" not in detection_handler
     assert "clearConfiguredLocation" not in clear_handler
     assert "saveConfiguredLocation:self.selectedLocationPolicy" in confirm_handler
     assert "clearConfiguredLocationWithError:&error" in confirm_handler
@@ -116,13 +116,14 @@ def test_manual_detection_requests_both_ip_families_and_uses_matching_geo_fallba
 
 def test_unified_card_keeps_actions_together_and_clear_is_a_real_button() -> None:
     assert "[cardStack addArrangedSubview:self.actionStack]" in CONTROLLER
-    assert "[cardStack addArrangedSubview:clearButton]" in CONTROLLER
+    assert "initWithArrangedSubviews:@[refreshButton, clearButton]" in CONTROLLER
     assert 'clearButton.accessibilityIdentifier = @"image-location-clear-saved"' in CONTROLLER
     assert "action:@selector(handleClearLocationTapped:)" in CONTROLLER
-    assert "[clearButton.heightAnchor constraintGreaterThanOrEqualToConstant:44.0]" in CONTROLLER
-    assert "self.clearSeparator.hidden = !self.hasStoredLocationConfiguration" in CONTROLLER
-    assert "self.clearLocationButton.hidden = !self.hasStoredLocationConfiguration" in CONTROLLER
-    assert "self.view.bounds.size.width < 390.0 || bodyPointSize > 19.0" in CONTROLLER
+    assert "[clearButton.heightAnchor constraintGreaterThanOrEqualToConstant:48.0]" in CONTROLLER
+    assert "self.actionStack.axis = UILayoutConstraintAxisHorizontal" in CONTROLLER
+    assert "self.actionStack.distribution = UIStackViewDistributionFillEqually" in CONTROLLER
+    assert "self.clearLocationButton.enabled = self.hasStoredLocationConfiguration && !self.loading" in CONTROLLER
+    assert "handleUseLocationTapped:" not in CONTROLLER
     assert "self.legacyLocationAddress = nil;" in CONTROLLER
     assert "self.legacyLocationAddress = nil;\n            self.requestFailed" not in CONTROLLER
 
