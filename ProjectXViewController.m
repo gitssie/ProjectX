@@ -487,6 +487,11 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
     NSArray<NSString *> *details = @[self.environmentModel, self.environmentNetwork, self.environmentCarrier, self.environmentRegion, self.environmentLocation];
     NSArray<NSString *> *symbols = @[@"iphone", @"wifi", @"antenna.radiowaves.left.and.right", @"location.north.line", @"mappin.and.ellipse"];
     content.text = PXLocalizedString(titles[(NSUInteger)row]); content.secondaryText = details[(NSUInteger)row]; content.image = [UIImage systemImageNamed:symbols[(NSUInteger)row]];
+    if (row == 4) {
+        content.secondaryTextProperties.numberOfLines = 1;
+        content.secondaryTextProperties.adjustsFontSizeToFitWidth = YES;
+        content.secondaryTextProperties.minimumScaleFactor = 0.1;
+    }
 }
 
 - (void)configureCleanupContent:(UIListContentConfiguration *)content forRow:(NSInteger)row {

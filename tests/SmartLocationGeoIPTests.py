@@ -47,7 +47,6 @@ def test_ui_has_loading_retry_and_confirm_states() -> None:
     assert "self.requestRevision != revision" in CONTROLLER
     assert "if (self.view.window)" in CONTROLLER
     assert "image.location.geo_ip.legacy_preserved" in CONTROLLER
-    assert "image.location.geo_ip.saved_preserved" in CONTROLLER
     assert "self.savedGeoIPLocation = location" in CONTROLLER
     assert "self.selectedLocationPolicy = [self.displayedLocation" in CONTROLLER
     assert "[self updateCarrierMismatchWarningForLocation:location]" in CONTROLLER

@@ -190,6 +190,9 @@
                                                color:UIColor.secondaryLabelColor];
     self.ipv6ValueLabel = [self labelWithTextStyle:UIFontTextStyleSubheadline
                                                color:UIColor.secondaryLabelColor];
+    self.ipv6ValueLabel.numberOfLines = 1;
+    self.ipv6ValueLabel.adjustsFontSizeToFitWidth = YES;
+    self.ipv6ValueLabel.minimumScaleFactor = 0.35;
     self.timeZoneValueLabel = [self labelWithTextStyle:UIFontTextStyleSubheadline
                                                    color:UIColor.secondaryLabelColor];
     self.coordinatesValueLabel = [self labelWithTextStyle:UIFontTextStyleSubheadline
@@ -383,8 +386,8 @@
         location.latitude, location.longitude];
     self.sourceLabel.text = self.displayedLocation
         ? PXLocalizedString(@"image.location.geo_ip.source")
-        : PXLocalizedString(@"image.location.geo_ip.saved_preserved");
-    self.sourceLabel.hidden = NO;
+        : nil;
+    self.sourceLabel.hidden = !self.displayedLocation;
     [self updateCarrierMismatchWarningForLocation:location];
 }
 

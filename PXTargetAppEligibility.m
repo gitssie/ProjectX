@@ -43,12 +43,20 @@ BOOL PXTargetAppCandidateIsEligible(NSDictionary<NSString *, id> *candidate) {
     NSString *executableName = [candidate[@"executableName"] isKindOfClass:[NSString class]]
         ? candidate[@"executableName"]
         : nil;
+    NSString *normalizedBundleIdentifier = bundleIdentifier.lowercaseString;
     if (!PXTargetBundleIdentifierIsValid(bundleIdentifier) || displayName.length == 0 ||
         ![bundlePathExtension.lowercaseString isEqualToString:@"app"] ||
         executableName.length == 0 || [executableName containsString:@"/"] ||
         ![candidate[@"installed"] boolValue] || [candidate[@"hidden"] boolValue] ||
         [candidate[@"plugin"] boolValue] || [candidate[@"appClip"] boolValue] ||
         [candidate[@"placeholder"] boolValue] || [candidate[@"launchProhibited"] boolValue]) {
+        return NO;
+    }
+    if ([normalizedBundleIdentifier containsString:@"roothide"] ||
+        [normalizedBundleIdentifier containsString:@"dopamine"] ||
+        [normalizedBundleIdentifier isEqualToString:@"org.coolstar.sileostore"] ||
+        [normalizedBundleIdentifier isEqualToString:@"com.saurik.cydia"] ||
+        [normalizedBundleIdentifier isEqualToString:@"com.apple.mobileslideshow"]) {
         return NO;
     }
     return PXAppIdentityBundleIsEligible(bundleIdentifier, YES, NO);

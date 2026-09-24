@@ -23,7 +23,29 @@ static NSDictionary<NSString *, id> *Candidate(NSString *bundleIdentifier,
 static void testEligibleCatalogIncludesUserAndSupportedVisibleSystemApps(void) {
     assert(PXTargetAppCandidateIsEligible(Candidate(@"com.example.visible", @"User")));
     assert(PXTargetAppCandidateIsEligible(Candidate(@"com.apple.mobilesafari", @"System")));
-    assert(PXTargetAppCandidateIsEligible(Candidate(@"com.apple.mobileslideshow", @"System")));
+}
+
+static void testCatalogExcludesJailbreakToolsPackageManagersAndPhotos(void) {
+    NSArray<NSString *> *excludedBundleIdentifiers = @[
+        @"com.example.RootHide.utility",
+        @"com.DoPaMiNe.launcher",
+        @"org.coolstar.SileoStore",
+        @"com.saurik.Cydia",
+        @"com.apple.mobileslideshow"
+    ];
+    for (NSString *bundleIdentifier in excludedBundleIdentifiers) {
+        assert(!PXTargetAppCandidateIsEligible(Candidate(bundleIdentifier, @"User")));
+    }
+    NSArray<NSDictionary<NSString *, id> *> *eligible = PXEligibleTargetAppCandidates(@[
+        Candidate(@"com.example.visible", @"User"),
+        Candidate(@"com.apple.mobilesafari", @"System"),
+        Candidate(@"com.example.RootHide.utility", @"User"),
+        Candidate(@"com.DoPaMiNe.launcher", @"User"),
+        Candidate(@"org.coolstar.SileoStore", @"User"),
+        Candidate(@"com.saurik.Cydia", @"User"),
+        Candidate(@"com.apple.mobileslideshow", @"System")
+    ]);
+    assert(eligible.count == 2);
 }
 
 static void testCatalogExcludesSelfExtensionsHiddenServicesAndNonInjectableRecords(void) {
@@ -81,6 +103,7 @@ static void testCatalogRejectsMalformedBundleIdentifiers(void) {
 int main(void) {
     @autoreleasepool {
         testEligibleCatalogIncludesUserAndSupportedVisibleSystemApps();
+        testCatalogExcludesJailbreakToolsPackageManagersAndPhotos();
         testCatalogExcludesSelfExtensionsHiddenServicesAndNonInjectableRecords();
         testCatalogSortsDeterministicallyByDisplayNameThenBundleIdentifier();
         testCatalogRejectsMalformedBundleIdentifiers();

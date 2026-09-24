@@ -274,10 +274,6 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     return PXLocalizedString(@"image.settings.section.general");
 }
 
-- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    return section == PXSettingsSectionEnvironment ? PXLocalizedString(@"image.settings.environment.footer") : nil;
-}
-
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     static NSString *const reuseIdentifier = @"ImageSettingsRow";
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:reuseIdentifier];
@@ -894,22 +890,15 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
     NSDictionary<NSString *, id> *compatibilityPresentation =
         [self compatibilityPresentationForIdentifier:identifier];
     BOOL isCompatible = [compatibilityPresentation[PXModelCompatibilityIsCompatibleKey] boolValue];
-    NSString *mismatchSummary = [compatibilityPresentation[PXModelCompatibilityMismatchSummaryKey]
-        isKindOfClass:NSString.class]
-        ? compatibilityPresentation[PXModelCompatibilityMismatchSummaryKey]
-        : PXLocalizedString(@"image.model.incompatible.status_unavailable");
     UIListContentConfiguration *content = [UIListContentConfiguration subtitleCellConfiguration];
     content.text = name;
-    NSString *modelDetail = [self modelDetailForRecord:record];
-    content.secondaryText = isCompatible
-        ? modelDetail
-        : PXLocalizedFormat(@"image.model.incompatible.detail", modelDetail, mismatchSummary);
+    content.secondaryText = [self modelDetailForRecord:record];
     content.image = [UIImage systemImageNamed:@"iphone"];
     content.imageProperties.tintColor = isCompatible ? UIColor.systemBlueColor : UIColor.systemOrangeColor;
     content.textProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     content.secondaryTextProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
-    content.secondaryTextProperties.color = isCompatible ? UIColor.secondaryLabelColor : UIColor.labelColor;
-    content.secondaryTextProperties.numberOfLines = isCompatible ? 3 : 4;
+    content.secondaryTextProperties.color = UIColor.secondaryLabelColor;
+    content.secondaryTextProperties.numberOfLines = 3;
     BOOL selected = isCompatible && [identifier isEqualToString:self.selectedIdentifier];
     cell.accessoryType = selected ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
     cell.userInteractionEnabled = YES;

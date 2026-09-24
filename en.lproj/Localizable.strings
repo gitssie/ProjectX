@@ -242,7 +242,6 @@
 "image.settings.section.environment" = "Environment defaults";
 "image.settings.section.app_scope" = "App scope";
 "image.settings.section.general" = "General";
-"image.settings.environment.footer" = "Selections persist as pending configuration and never alter the active environment.";
 "image.settings.open_hint" = "Double tap to configure.";
 "image.settings.model.title" = "Environment model";
 "image.settings.network.title" = "Available networks";
@@ -406,7 +405,6 @@
 "image.location.geo_ip.address.placeholder" = "No GEO IP location yet";
 "image.location.geo_ip.details.placeholder" = "IP, time zone, and coordinates will appear here.";
 "image.location.geo_ip.legacy_preserved" = "This saved legacy location remains active. A successful GEO IP detection can replace it.";
-"image.location.geo_ip.saved_preserved" = "The saved GEO IP location remains active. Refresh to detect a new location.";
 "image.location.geo_ip.public_ip" = "IP: %@";
 "image.location.geo_ip.time_zone" = "Time zone: %@";
 "image.location.geo_ip.coordinates" = "Coordinates: %.4f, %.4f";

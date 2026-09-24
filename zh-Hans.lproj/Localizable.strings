@@ -242,7 +242,6 @@
 "image.settings.section.environment" = "环境默认配置";
 "image.settings.section.app_scope" = "应用范围";
 "image.settings.section.general" = "通用";
-"image.settings.environment.footer" = "选择会保存为待应用配置，不会更改当前环境。";
 "image.settings.open_hint" = "轻点两下以配置。";
 "image.settings.model.title" = "环境型号";
 "image.settings.network.title" = "可用网络";
@@ -406,7 +405,6 @@
 "image.location.geo_ip.address.placeholder" = "尚未获取 GEO IP 位置";
 "image.location.geo_ip.details.placeholder" = "这里将显示 IP、时区和坐标。";
 "image.location.geo_ip.legacy_preserved" = "已保存的旧位置仍然有效，GEO IP 检测成功后可以替换它。";
-"image.location.geo_ip.saved_preserved" = "已保存的 GEO IP 位置仍然有效，刷新后可检测新位置。";
 "image.location.geo_ip.public_ip" = "IP：%@";
 "image.location.geo_ip.time_zone" = "时区：%@";
 "image.location.geo_ip.coordinates" = "坐标：%.4f, %.4f";
