@@ -16,6 +16,7 @@ case "\$(cat "\$2")" in
     app-contract) cat "$project_root/ProjectX.entitlements" ;;
     shared-contract) cat "$project_root/ent.plist" ;;
     worker-contract) cat "$project_root/KeychainWorkerTemplate.entitlements" ;;
+    vendor-contract) cat "$project_root/AppStateVendorWorker.entitlements" ;;
     *) exit 1 ;;
 esac
 EOF
@@ -106,6 +107,8 @@ EOF
 EOF
     printf 'shared-contract\n' > "$payload_root/Library/WeaponX/WeaponXDaemon"
     printf 'worker-contract\n' > "$payload_root/Library/WeaponX/ProjectXKeychainWorker"
+    printf 'worker-contract\n' > "$payload_root/Library/WeaponX/ProjectXAppStateWorker"
+    printf 'vendor-contract\n' > "$payload_root/Library/WeaponX/ProjectXAppStateVendorWorker"
     : > "$payload_root/usr/bin/projectx-setup"
     : > "$payload_root/usr/bin/weaponx-debug"
     chmod 755 \
@@ -114,6 +117,8 @@ EOF
         "$payload_root/Library/MobileSubstrate/DynamicLibraries/ProjectXLoader.dylib" \
         "$payload_root/Library/WeaponX/WeaponXDaemon" \
         "$payload_root/Library/WeaponX/ProjectXKeychainWorker" \
+        "$payload_root/Library/WeaponX/ProjectXAppStateWorker" \
+        "$payload_root/Library/WeaponX/ProjectXAppStateVendorWorker" \
         "$payload_root/usr/bin/projectx-setup" \
         "$payload_root/usr/bin/weaponx-debug"
     cat > "$payload_root/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist" <<'EOF'

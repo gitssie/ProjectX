@@ -2,6 +2,9 @@
 #import "ProjectXViewController.h"
 
 #import "AppDataCleaner.h"
+#import "AppDataBackupRestoreViewController.h"
+#import "PXAppBackupGridView.h"
+#import "PXTargetAppEligibility.h"
 #import "DeviceModelManager.h"
 #import "GraphicsIdentity.h"
 #import "IdentifierManager.h"
@@ -60,6 +63,8 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
 @property (nonatomic, strong) UITableView *tableView;
 @property (nonatomic, copy) NSSet<NSString *> *selectedTargetBundleIdentifiers;
 @property (nonatomic, assign) NSInteger selectedTargetCount;
+@property (nonatomic, copy) NSArray<NSDictionary *> *backupApplications;
+@property (nonatomic, assign) NSUInteger backupApplicationsRevision;
 @property (nonatomic, assign) PXHomeEnvironmentState environmentState;
 @property (nonatomic, copy) NSString *environmentModel;
 @property (nonatomic, copy) NSString *environmentNetwork;
@@ -207,6 +212,7 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
     }
     self.selectedTargetBundleIdentifiers = [selectedBundleIdentifiers copy];
     self.selectedTargetCount = self.selectedTargetBundleIdentifiers.count;
+    [self refreshBackupApplications];
 
     NSError *summaryError = nil;
     NSDictionary<NSString *, id> *pendingModel = [self
@@ -329,22 +335,30 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
 }
 
 - (PXHomeSection)homeSectionForTableSection:(NSInteger)tableSection {
-    if (!self.hasPendingChanges && tableSection >= PXHomeSectionPendingChanges) {
-        return (PXHomeSection)(tableSection + 1);
-    }
-    return (PXHomeSection)tableSection;
+    return (PXHomeSection)[[self visibleHomeSections][(NSUInteger)tableSection] integerValue];
+}
+- (BOOL)usesBackupMode {
+    return [self.environmentPolicyStore applicationEnvironmentModeWithError:nil]!=PXApplicationEnvironmentModeCleanup;
+}
+- (NSArray<NSNumber *> *)visibleHomeSections {
+    NSMutableArray *sections=[NSMutableArray arrayWithArray:@[@(PXHomeSectionCurrentEnvironment),@(PXHomeSectionTargetApps)]];
+    if(self.hasPendingChanges && ![self usesBackupMode])[sections addObject:@(PXHomeSectionPendingChanges)];
+    if(![self usesBackupMode])[sections addObject:@(PXHomeSectionGenerate)];
+    [sections addObjectsFromArray:@[@(PXHomeSectionPrivacyCleanup),@(PXHomeSectionPhysicalDevice)]];
+    return sections;
 }
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
     (void)tableView;
-    return PXHomeSectionCount - (self.hasPendingChanges ? 0 : 1);
+    return [self visibleHomeSections].count;
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     (void)tableView;
     PXHomeSection homeSection = [self homeSectionForTableSection:section];
     if (homeSection == PXHomeSectionCurrentEnvironment) { return 5; }
-    if (homeSection == PXHomeSectionPrivacyCleanup) { return 3; }
+    if (homeSection == PXHomeSectionTargetApps) { return [self usesBackupMode]?2:1; }
+    if (homeSection == PXHomeSectionPrivacyCleanup) { return [self usesBackupMode]?1:3; }
     if (homeSection == PXHomeSectionPhysicalDevice) { return 1; }
     return 1;
 }
@@ -352,7 +366,7 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     (void)tableView;
     switch ([self homeSectionForTableSection:section]) {
-        case PXHomeSectionTargetApps: return PXLocalizedString(@"image.home.section.target_apps");
+        case PXHomeSectionTargetApps: return PXLocalizedString([self usesBackupMode]?@"app_state.home.title":@"image.home.section.target_apps");
         case PXHomeSectionCurrentEnvironment: return PXLocalizedString(@"image.home.section.current_environment");
         case PXHomeSectionPrivacyCleanup: return PXLocalizedString(@"image.home.section.cleanup");
         case PXHomeSectionPhysicalDevice: return PXLocalizedString(@"image.home.device.title");
@@ -366,6 +380,32 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
         return self.cleanupStatusMessage;
     }
     return nil;
+}
+- (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
+    NSString *title=[self tableView:tableView titleForHeaderInSection:section];
+    if(title.length==0)return nil;
+    NSString *symbol=nil;
+    switch([self homeSectionForTableSection:section]) {
+        case PXHomeSectionCurrentEnvironment:symbol=@"iphone";break;
+        case PXHomeSectionTargetApps:symbol=@"square.stack.3d.up";break;
+        case PXHomeSectionPrivacyCleanup:symbol=@"hand.raised";break;
+        case PXHomeSectionPhysicalDevice:symbol=@"cpu";break;
+        default:return nil;
+    }
+    UIView *header=[UIView new];
+    header.preservesSuperviewLayoutMargins=YES;
+    header.directionalLayoutMargins=NSDirectionalEdgeInsetsMake(0,16,0,16);
+    UIImageView *icon=[[UIImageView alloc] initWithImage:[UIImage systemImageNamed:symbol]];
+    icon.contentMode=UIViewContentModeScaleAspectFit;
+    icon.tintColor=UIColor.secondaryLabelColor;icon.translatesAutoresizingMaskIntoConstraints=NO;
+    UILabel *label=[UILabel new];label.text=title;
+    label.font=[UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];label.adjustsFontForContentSizeCategory=YES;
+    label.textColor=UIColor.secondaryLabelColor;label.translatesAutoresizingMaskIntoConstraints=NO;
+    [header addSubview:icon];[header addSubview:label];
+    [NSLayoutConstraint activateConstraints:@[[icon.leadingAnchor constraintEqualToAnchor:header.layoutMarginsGuide.leadingAnchor],
+        [icon.centerYAnchor constraintEqualToAnchor:header.centerYAnchor],[icon.widthAnchor constraintEqualToConstant:16],[icon.heightAnchor constraintEqualToConstant:16],
+        [label.leadingAnchor constraintEqualToAnchor:icon.trailingAnchor constant:7],[label.centerYAnchor constraintEqualToAnchor:header.centerYAnchor],
+        [label.trailingAnchor constraintLessThanOrEqualToAnchor:header.layoutMarginsGuide.trailingAnchor]]];return header;
 }
 
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
@@ -395,6 +435,7 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
     PXHomeSection section = [self homeSectionForTableSection:indexPath.section];
+    if (section == PXHomeSectionTargetApps && indexPath.row == 1) { return [self backupGridCell]; }
     if (section == PXHomeSectionGenerate) { return [self generationCellForTableView:tableView]; }
     if (section == PXHomeSectionPendingChanges) { return [self pendingChangesCellForTableView:tableView]; }
     static NSString *const reuseIdentifier = @"ImageHomeCell";
@@ -441,6 +482,13 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
     content.imageProperties.tintColor = UIColor.systemBlueColor;
     content.textProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     content.secondaryTextProperties.font = [UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline];
+    if(section==PXHomeSectionTargetApps && [self usesBackupMode]) {
+        content.textProperties.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleFootnote] scaledFontForFont:[UIFont systemFontOfSize:13]];
+        content.secondaryTextProperties.font=[[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:11]];
+        content.secondaryText=PXLocalizedString(@"app_state.home.select");
+        content.imageProperties.maximumSize=CGSizeMake(20,20);
+        content.directionalLayoutMargins=NSDirectionalEdgeInsetsMake(8,16,8,16);
+    }
     cell.contentConfiguration = content;
     cell.accessibilityLabel = PXLocalizedFormat(@"accessibility.settings.row", content.text, content.secondaryText);
     cell.accessibilityHint = cell.selectionStyle == UITableViewCellSelectionStyleNone ? nil : PXLocalizedString(@"image.home.open_hint");
@@ -534,7 +582,7 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     PXHomeSection section = [self homeSectionForTableSection:indexPath.section];
-    if (section == PXHomeSectionTargetApps) { [self handleTargetAppsTapped]; }
+    if (section == PXHomeSectionTargetApps && indexPath.row == 0) { [self handleTargetAppsTapped]; }
     if (section == PXHomeSectionCurrentEnvironment && indexPath.row == 4) { [self handleSmartLocationTapped]; }
     if (section == PXHomeSectionPrivacyCleanup) {
         if (self.cleanupInProgress) { return; }
@@ -544,7 +592,67 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
     }
 }
 
-- (void)handleSettingsTapped:(UIBarButtonItem *)sender { [self.navigationController pushViewController:[[PXSettingsHubViewController alloc] initWithStyle:UITableViewStyleInsetGrouped] animated:YES]; }
+- (void)handleSettingsTapped:(UIBarButtonItem *)sender { if(self.cleanupInProgress || self.environmentState==PXHomeEnvironmentStateProcessing)return;[self.navigationController pushViewController:[[PXSettingsHubViewController alloc] initWithStyle:UITableViewStyleInsetGrouped] animated:YES]; }
+
+- (void)refreshBackupApplications {
+    NSSet *selected = [self.selectedTargetBundleIdentifiers copy];
+    NSUInteger revision = ++self.backupApplicationsRevision;
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        PXInstalledAppSnapshot *snapshot = [[PXTargetSelectionServices sharedServices].snapshotProvider
+            installedAppSnapshotForSelectedBundleIdentifiers:selected error:nil];
+        NSMutableDictionary *candidates = [NSMutableDictionary dictionary];
+        if (snapshot.isTrusted) {
+            for (NSDictionary *candidate in PXEligibleTargetAppCandidates(snapshot.applicationCandidates)) {
+                candidates[candidate[@"bundleIdentifier"]] = candidate;
+            }
+        }
+        NSMutableArray *applications = [NSMutableArray array];
+        for (NSString *bundleID in selected) {
+            NSDictionary *candidate = candidates[bundleID];
+            NSMutableDictionary *app = candidate ? [candidate mutableCopy] : [@{@"bundleIdentifier":bundleID, @"displayName":bundleID} mutableCopy];
+            app[@"available"] = @(candidate && ![candidate[@"applicationType"] isEqual:@"System"] && !PXTargetAppCandidateIsMobileSafari(candidate));
+            [applications addObject:app];
+        }
+        [applications sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            return [a[@"displayName"] localizedStandardCompare:b[@"displayName"]];
+        }];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            ProjectXViewController *strongSelf = weakSelf;
+            if (!strongSelf || strongSelf.backupApplicationsRevision != revision) return;
+            strongSelf.backupApplications = applications;
+            [strongSelf.tableView reloadData];
+        });
+    });
+}
+
+- (UITableViewCell *)backupGridCell {
+    UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+    cell.backgroundColor = UIColor.secondarySystemGroupedBackgroundColor;
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    cell.separatorInset = UIEdgeInsetsMake(0, 10000, 0, 0);
+    __weak typeof(self) weakSelf = self;
+    PXAppBackupGridView *grid = [[PXAppBackupGridView alloc] initWithApplications:self.backupApplications ?: @[]
+        openHandler:^(NSDictionary *application) {
+            ProjectXViewController *strongSelf = weakSelf;
+            if(![strongSelf usesBackupMode] || strongSelf.cleanupInProgress || strongSelf.environmentState==PXHomeEnvironmentStateProcessing)return;
+            if (![strongSelf.selectedTargetBundleIdentifiers containsObject:application[@"bundleIdentifier"]]) return;
+            AppDataBackupRestoreViewController *controller = [AppDataBackupRestoreViewController new];
+            controller.bundleID = application[@"bundleIdentifier"];
+            controller.appName = application[@"displayName"];
+            controller.appIcon = application[@"icon"];
+            [strongSelf.navigationController pushViewController:controller animated:YES];
+        }];
+    grid.translatesAutoresizingMaskIntoConstraints = NO;
+    [cell.contentView addSubview:grid];
+    [NSLayoutConstraint activateConstraints:@[
+        [grid.leadingAnchor constraintEqualToAnchor:cell.contentView.leadingAnchor constant:12],
+        [grid.trailingAnchor constraintEqualToAnchor:cell.contentView.trailingAnchor constant:-12],
+        [grid.topAnchor constraintEqualToAnchor:cell.contentView.topAnchor constant:8],
+        [grid.bottomAnchor constraintEqualToAnchor:cell.contentView.bottomAnchor constant:-8]
+    ]];
+    return cell;
+}
 - (void)handleTargetAppsTapped { PXTargetAppsViewController *controller = [[PXTargetAppsViewController alloc] initWithSelectedBundleIdentifiers:self.selectedTargetBundleIdentifiers completion:^(NSSet<NSString *> *selectedBundleIdentifiers) { [self handleTargetAppsSelection:selectedBundleIdentifiers]; }]; [self.navigationController pushViewController:controller animated:YES]; }
 - (void)handleSmartLocationTapped { PXSmartLocationViewController *controller = [[PXSmartLocationViewController alloc] initWithLocationCommittedHandler:@selector(handleCommittedLocationSummary:) target:self]; [self.navigationController pushViewController:controller animated:YES]; }
 - (void)handleTargetAppsSelection:(NSSet<NSString *> *)selectedBundleIdentifiers { self.selectedTargetBundleIdentifiers = [selectedBundleIdentifiers copy]; self.selectedTargetCount = self.selectedTargetBundleIdentifiers.count; [self refreshEnvironmentSummary]; }
@@ -552,6 +660,7 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
 - (void)handleGenerateTapped:(UIButton *)sender { [self beginNewEnvironment]; }
 
 - (void)beginNewEnvironment {
+    if([self usesBackupMode])return;
     if (self.selectedTargetCount == 0) { [self presentNoTargetsAlert]; return; }
     if (![self.environmentOperations isServiceReady]) {
         self.environmentState = PXHomeEnvironmentStateServiceUnavailable;
@@ -836,6 +945,7 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
 - (void)handleClearKeychainTapped { [self presentCleanupConfirmationForAction:PXHomeCleanupActionKeychain titleKey:@"image.home.cleanup.keychain" messageKey:@"image.home.cleanup.keychain.confirmation"]; }
 - (void)handleClearSafariTapped { [self presentCleanupConfirmationForAction:PXHomeCleanupActionWebData titleKey:@"image.home.cleanup.safari" messageKey:@"image.home.cleanup.safari.confirmation"]; }
 - (void)presentCleanupConfirmationForAction:(PXHomeCleanupAction)cleanupAction titleKey:(NSString *)titleKey messageKey:(NSString *)messageKey {
+    if([self usesBackupMode] && cleanupAction!=PXHomeCleanupActionPasteboard)return;
     if (self.cleanupInProgress) {
         return;
     }
@@ -867,6 +977,7 @@ static const CGFloat PXHomePrimaryActionVerticalInset = 16.0;
     });
 }
 - (void)beginCleanupAction:(PXHomeCleanupAction)cleanupAction name:(NSString *)cleanupName {
+    if([self usesBackupMode] && cleanupAction!=PXHomeCleanupActionPasteboard)return;
     if (self.cleanupInProgress) {
         return;
     }

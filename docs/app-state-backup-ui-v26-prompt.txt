@@ -1,0 +1,2 @@
+Tool: built-in ImageGen, editing v25.
+Change only backup list rows: remove leading app icons, reclaim space, left-align titles at 16pt inset, compact approximately 64pt row height. Use two lines: title; remark and saved time combined in gray (备用账号 · 今天 08:51 / 日常账号 · 今天 08:55 / 测试账号 · 今天 07:20). Keep trailing small switch and ellipsis icons with independent 44pt hit areas. Unified white list with inset dividers. Keep left row menu open below its ellipsis. Preserve primary panels with real Vinted icon and green dot, navigation, toolbar, warning, colors and all other layout.

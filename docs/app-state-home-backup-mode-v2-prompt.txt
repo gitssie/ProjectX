@@ -1,0 +1,5 @@
+Tool: built-in ImageGen
+Reference: app-state-home-backup-mode-v1.png
+
+Edit this ProjectX homepage design precisely. Keep the existing composition, background, environment panel and its five rows, gear button, app icons and clipboard tool as they are. Remove the top-left “备份模式” pill, leaving that space empty as in the actual current homepage.
+Only redesign the “应用备份” panel's selection row: make “已选择 3 个应用” significantly smaller, approximately 13pt logical regular text rather than 17pt bold, secondary text “选择要管理的应用” 11pt muted gray. Reduce its blue app-selection symbol to 20pt. Give the row a compact 48pt logical height, with a small right chevron and subtle bottom divider. Keep it clearly tappable. Below, preserve the single unified three-column launcher area with 48pt authentic Vinted, eBay and Etsy app icons and 13pt app names. The icon grid should be the visual focus of this panel; the selection row is secondary. Retain overall white rounded panel and current spacing between app tiles. All other homepage regions must remain visually unchanged. Render one high fidelity portrait mobile UI image, accurate Chinese text, same clean visual style.

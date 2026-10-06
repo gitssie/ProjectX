@@ -1,0 +1,4 @@
+Tool: built-in ImageGen; edited v24 design.
+Replace every person avatar with the installed target application's real icon, matching the Vinted navigation icon. Main panel 48pt, list 36pt. Green status dot only on the main panel. Actual implementation reuses the installed app icon provider used by the home grid.
+List actions: icon-only 18pt arrow.left.arrow.right and separate ellipsis menu, each with a 44pt touch target. Menu: 重命名, 修改备注, 删除备份 (red trash). Show menu anchored to the 20261006-05 list ellipsis on the left screen; right screen menus closed. Preserve v24 structure, typography, colors and duplicate warning.
+Final correction: Move the OPEN menu below the 20261006-05 row, pointer directly under its ellipsis. Restore unobscured primary-panel 编辑. Keep all other visual elements unchanged.

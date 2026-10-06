@@ -5,6 +5,7 @@
 #import "KeychainCommand.h"
 #import "ProjectXLogging.h"
 #import "PXRootHidePath.h"
+#import "PXEnvironmentPolicy.h"
 
 @implementation PXProjectXEnvironmentOperations
 
@@ -35,6 +36,7 @@
 }
 
 - (BOOL)terminateTargetBundleIdentifier:(NSString *)bundleIdentifier error:(NSError **)error {
+    if(![self allowsCleanupWithError:error])return NO;
     return [[AppDataCleaner sharedManager]
         terminateTargetBundleIdentifier:bundleIdentifier
         error:error];
@@ -42,6 +44,7 @@
 
 - (void)clearKeychainForTargetBundleIdentifier:(NSString *)bundleIdentifier
                                      completion:(void (^)(BOOL, NSError *))completion {
+    NSError *modeError=nil;if(![self allowsCleanupWithError:&modeError]){completion(NO,modeError);return;}
     [[AppDataCleaner sharedManager]
         clearKeychainForBundleID:bundleIdentifier
         includeAppFamily:NO
@@ -71,6 +74,7 @@
 
 - (void)clearTargetBundleIdentifier:(NSString *)bundleIdentifier
                          completion:(void (^)(BOOL, NSError *))completion {
+    NSError *modeError=nil;if(![self allowsCleanupWithError:&modeError]){completion(NO,modeError);return;}
     [[AppDataCleaner sharedManager] clearDataForBundleID:bundleIdentifier completion:completion];
 }
 
@@ -81,6 +85,7 @@
 }
 
 - (BOOL)clearSafariWithError:(NSError **)error {
+    if(![self allowsCleanupWithError:error])return NO;
     if (![self.targetBundleIdentifiers containsObject:@"com.apple.mobilesafari"]) {
         return YES;
     }
@@ -90,7 +95,15 @@
 }
 
 - (BOOL)generateAndActivateEnvironmentWithError:(NSError **)error {
+    if(![self allowsCleanupWithError:error])return NO;
     return [[IdentifierManager sharedManager] regenerateAllEnabledIdentifiersWithError:error];
+}
+- (BOOL)allowsCleanupWithError:(NSError **)error {
+    NSError *modeError=nil;
+    PXApplicationEnvironmentMode mode=[[PXEnvironmentPolicyStore sharedStore] applicationEnvironmentModeWithError:&modeError];
+    if(!modeError && mode==PXApplicationEnvironmentModeCleanup)return YES;
+    if(error)*error=modeError?:[NSError errorWithDomain:PXEnvironmentPolicyErrorDomain code:4 userInfo:@{NSLocalizedDescriptionKey:@"Application cleanup is disabled in backup mode"}];
+    return NO;
 }
 
 @end

@@ -4,6 +4,9 @@ set -eu
 
 LAUNCHCTL="/bin/launchctl"
 LAUNCHDAEMON_LABEL="com.hydra.weaponx.guardian"
+case "${1:-}" in
+    remove|deconfigure) rm -f /etc/sudoers.d/projectx-app-state ;;
+esac
 
 if [ -x "$LAUNCHCTL" ]; then
     "$LAUNCHCTL" bootout "system/$LAUNCHDAEMON_LABEL" 2>/dev/null || true

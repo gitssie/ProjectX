@@ -116,6 +116,8 @@ check_staging() {
     require_path "$staging_root" "Library/MobileSubstrate/DynamicLibraries/ProjectXLoader.plist"
     require_path "$staging_root" "Library/WeaponX/WeaponXDaemon"
     require_path "$staging_root" "Library/WeaponX/ProjectXKeychainWorker"
+    require_path "$staging_root" "Library/WeaponX/ProjectXAppStateWorker"
+    require_path "$staging_root" "Library/WeaponX/ProjectXAppStateVendorWorker"
     require_path "$staging_root" "Library/WeaponX/Guardian"
     require_path "$staging_root" "Library/LaunchDaemons/com.hydra.weaponx.guardian.plist"
     require_path "$staging_root" "Library/libSandy/projectx_filesystem_access.plist"
@@ -143,6 +145,8 @@ check_staging() {
         "Library/MobileSubstrate/DynamicLibraries/ProjectXLoader.dylib" \
         "Library/WeaponX/WeaponXDaemon" \
         "Library/WeaponX/ProjectXKeychainWorker" \
+        "Library/WeaponX/ProjectXAppStateWorker" \
+        "Library/WeaponX/ProjectXAppStateVendorWorker" \
         "usr/bin/projectx-setup" \
         "usr/bin/weaponx-debug"; do
         if [ ! -x "$staging_root/$executable_path" ]; then
@@ -191,18 +195,25 @@ check_worker_binary() {
     [ -n "$otool_path" ] && [ -x "$otool_path" ] ||
         fail "otool is required for staged worker dependency validation"
 
+    for worker_name in ProjectXKeychainWorker ProjectXAppStateWorker ProjectXAppStateVendorWorker; do
+    worker_path="$staging_root/Library/WeaponX/$worker_name"
+    [ -f "$worker_path" ] && [ -x "$worker_path" ] || fail "worker template is missing or not executable: $worker_name"
     worker_architectures=$("$lipo_path" -archs "$worker_path")
     for required_architecture in arm64 arm64e; do
         case " $worker_architectures " in
             *" $required_architecture "*) ;;
             *) fail "staged one-shot Keychain worker is missing $required_architecture" ;;
         esac
+        # The root vendor helper uses physical Apple paths only and has no
+        # bootstrap dependencies. The mobile workers require the signed-copy anchor.
+        [ "$worker_name" = "ProjectXAppStateVendorWorker" ] && continue
         dependency_output=$("$otool_path" -arch "$required_architecture" -L "$worker_path")
         dependency_count=$(printf '%s\n' "$dependency_output" |
             grep -Fc '@loader_path/.jbroot/usr/lib/libroothide.dylib' || true)
         if [ "$dependency_count" -ne 1 ]; then
             fail "staged $required_architecture worker must use exactly one RootHide loader anchor"
         fi
+    done
     done
 
     echo "RootHide staged worker dependency audit passed."
@@ -256,7 +267,9 @@ check_package() {
         "Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.dylib|ent.plist" \
         "Library/MobileSubstrate/DynamicLibraries/ProjectXLoader.dylib|ent.plist" \
         "Library/WeaponX/WeaponXDaemon|ent.plist" \
-        "Library/WeaponX/ProjectXKeychainWorker|KeychainWorkerTemplate.entitlements"; do
+        "Library/WeaponX/ProjectXKeychainWorker|KeychainWorkerTemplate.entitlements" \
+        "Library/WeaponX/ProjectXAppStateWorker|KeychainWorkerTemplate.entitlements" \
+        "Library/WeaponX/ProjectXAppStateVendorWorker|AppStateVendorWorker.entitlements"; do
         binary_path=${entitlement_target%%|*}
         expected_name=${entitlement_target#*|}
         target_name=$(basename -- "$binary_path")

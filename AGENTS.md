@@ -17,8 +17,9 @@ ProjectX 是运行在 **Dopamine RootHide、iOS 15+** 真机上的本地 UIKit �
 1. ProjectX 是单机、单所有者、直接使用的工具：不得新增登录、订阅、账户校验、本地 API 鉴权或其他使用门槛。
 2. 控制入口仅是安装在设备上的 UIKit 应用：不得新增 LAN HTTP API、WebSocket 服务、桌面控制器或远程 Rootless Agent。
 3. Profile 是隐藏的后端状态，由系统自动生成和激活：不得恢复让用户创建、命名、选择、切换或管理 Profile 的旧 UI。
-4. 不实现 App 数据备份、恢复或快照功能，除非用户以后明确改变此决定。
+4. 用户于 2026-10-06 明确授权按 `docs/app-state-backup-ui-v27.png` 调整账号备份页：顶部使用目标应用真实图标，直接提供备份、基线和编辑；列表无图标、两行紧凑布局、切换仅显示图标，左滑显示重命名、备注和删除，禁止全滑直接删除。复用 `tools/app-state/` v2 核心，每个 IDFV 使用一个持续更新的快照目录；根级 `manifest.plist` 使用简单展示字段 title、note、idfv、date、version、build，当前关联与恢复 pending 状态另存 ProjectX 私有配置。首页保留原应用选择行，仅额外加入统一背景的已选应用宫格。此功能不涉及隐藏的硬件 Profile 管理，也不改变首页其他区域。
 5. `WeaponXDaemon` 只承担本地 guardian/watchdog 职责，不得演变成网络服务。
+   用户于 2026-10-06 追加确认：首页按 `docs/app-state-home-backup-mode-v2.png` 实现应用备份区，其他首页布局保持现状；设置提供备份／清理模式二选一，默认备份，首页无模式标识。备份模式和应用清理互斥，切换模式不清理数据或删除备份。其他备份左滑只保留编辑和删除，编辑与 active 面板共用名称／备注表单。Modal 进度仅显示业务提示，技术阶段、原始错误和路径保留内部诊断，不向用户展示。
 6. 当前 Profile 的地区身份由选定 Carrier 派生；目标进程中的地区 Hook 必须使用 generation-scoped、fail-closed 的缓存。
 7. 身份值必须遵循真实生命周期和作用域，不允许在每次 getter 调用时重新随机：
    - 设备级值在 Profile 生命周期内稳定；
@@ -151,6 +152,7 @@ Theos `roothide` scheme 会处理 package staging。以下文件中的安装位�
 - 优先使用 `NSFileManager`/POSIX 参数数组；禁止未转义字符串、通配符和 `rm -rf` 扩张删除范围。
 - Keychain 清理使用按请求复制并签名的短生命周期 external worker；每次只授予从目标 App 已签名 entitlement 提取、且通过同 Team ID 与安全组名校验的 exact access groups（包括目标声明的自定义/shared group）。禁止 wildcard、Apple/system group、目标签名中不存在的 group、常驻广权限 daemon 或通过启动目标 App 完成清理；任一目标已声明 group 被跳过时必须把本次清理报告为失败，不能误报成功。
 - 不删除 synchronizable Keychain 项。
+  用户于 2026-10-06 明确要求基线恢复后全部目标钥匙串清空，以及快照恢复清除归档中不存在的所有目标条目：`tools/app-state/` 及其 UIKit 账号备份 worker 允许按目标已签名 exact scope 和具体记录主键删除同步条目。快照中存在的同步条目仍按原属性更新或加入，恢复后完整回读必须与归档一致。此例外不扩大到系统/其他 App 钥匙串，也不改变原有自动清理流程。
 - 每个 scope 删除后必须验证，再进行文件系统清理。
 - 保留 fail-closed 行为：无法证明路径或权限正确时停止，而不是尝试更激进的删除。
 
@@ -212,6 +214,7 @@ Theos `roothide` scheme 会处理 package staging。以下文件中的安装位�
 - 包含 `/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.*`；
 - 包含 `/Library/WeaponX/WeaponXDaemon`；
 - 包含无静态特权 entitlement 的 `/Library/WeaponX/ProjectXKeychainWorker` template；
+- 包含固定 root 所有的 `/Library/WeaponX/ProjectXAppStateVendorWorker`，仅带原生 IDFV 操作需要的平台/无容器权限，不带钥匙串访问组；安装脚本只授权此固定受限 helper 的 `sudo -n`，不得授权 mobile 可写临时 worker 或通用命令；
 - 包含 `/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist`；
 - 包含所需维护脚本与 debug/setup 工具，并具有正确 executable bit；
 - LaunchScreen 是编译后的 `LaunchScreen.storyboardc`，不是原始 storyboard；
@@ -235,6 +238,8 @@ Theos `roothide` scheme 会处理 package staging。以下文件中的安装位�
 不得把 SSH 密码、签名秘密、设备地址或其他凭据写入仓库、脚本、issue 或日志。
 
 ### 8.1 已验证的本机 RootHide + Sileo 部署流程
+
+用户于 2026-10-06 明确要求本地源使用局域网而非 SSH。`deploy_sileo.sh` 支持 `PROJECTX_SILEO_TRANSPORT=lan`：使用当前本机私网 IPv4 的 SOURCE_URL 与 HTTP_PORT，supervisor 只启动 HTTP（bind 0.0.0.0），不生成 SSH 配置、不连接 SSH。仍复用包审计、原子仓库生成、PID ownership 与 HTTP 全内容校验；该模式的 verify 是本机通过 LAN 地址核对内容，不声称完成手机端测试。下文 loopback/SSH 约束仅适用于默认 tunnel 模式。LAN 源供用户在 Sileo 手动刷新和安装，安装完成前保持服务运行。
 
 `scripts/deploy_sileo.sh` 是唯一规范的 ProjectX build、audit、APT publication、HTTP、SSH reverse tunnel 和 device-side repository verification 入口。不得再逐次拼接临时 Python、APT hash、HTTP 或 SSH 命令。脚本不会添加或打开 Sileo source，也不会安装 package。
 

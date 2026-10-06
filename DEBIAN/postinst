@@ -18,6 +18,37 @@ chmod 755 "$WEAPONX_DIR" "$GUARDIAN_DIR" "/Library/Sandbox/Profile"
 chown mobile:mobile "$WEAPONX_DIR"
 chown root:wheel "$GUARDIAN_DIR" "/Library/Sandbox/Profile"
 
+# Only the package-owned, argument-restricted IDFV helper may run without a password.
+# Temporary mobile-owned workers are deliberately not authorized.
+VENDOR_HELPER="/Library/WeaponX/ProjectXAppStateVendorWorker"
+SUDO_RULE="/etc/sudoers.d/projectx-app-state"
+chown root:wheel "/Library/WeaponX" "$VENDOR_HELPER"
+chmod 755 "/Library/WeaponX" "$VENDOR_HELPER"
+VENDOR_NATIVE=$(/usr/bin/jbroot "$VENDOR_HELPER")
+# RootHide's realpath CLI converts bootstrap paths back to logical paths.
+# Keep the native path returned by jbroot, as for the existing ZXTouch rule.
+case "$VENDOR_NATIVE" in
+    /*) ;;
+    *) echo "error: Cannot resolve IDFV helper" >&2; exit 1 ;;
+esac
+case "$VENDOR_NATIVE" in
+    *[!a-zA-Z0-9/._-]*) echo "error: Invalid IDFV helper path" >&2; exit 1 ;;
+esac
+mkdir -p /etc/sudoers.d
+SUDO_TEMP=$(mktemp /etc/sudoers.d/.projectx-app-state.XXXXXX)
+trap 'rm -f "$SUDO_TEMP"' EXIT HUP INT TERM
+printf 'mobile ALL=(root) NOPASSWD: %s\n' "$VENDOR_NATIVE" > "$SUDO_TEMP"
+chown root:wheel "$SUDO_TEMP"
+chmod 440 "$SUDO_TEMP"
+# Procursus installs this library under libexec/sudo, while this device's
+# visudo rpath looks under usr/lib. Supply the trusted bootstrap library path
+# only to this validation process, without changing global files or libraries.
+SUDO_LIBRARIES=$(/usr/bin/jbroot /usr/libexec/sudo)
+/usr/bin/env "DYLD_LIBRARY_PATH=$SUDO_LIBRARIES" /usr/sbin/visudo -cf "$SUDO_TEMP"
+mv -f "$SUDO_TEMP" "$SUDO_RULE"
+trap - EXIT HUP INT TERM
+/usr/bin/sudo -n -l -U mobile "$VENDOR_NATIVE" --check
+
 CURRENT_PROFILE="$WEAPONX_DIR/current_profile.plist"
 if [ ! -f "$CURRENT_PROFILE" ]; then
     cat > "$CURRENT_PROFILE" <<'PLIST'

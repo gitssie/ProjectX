@@ -35,6 +35,8 @@ typedef NS_ENUM(NSInteger, PXEnvironmentRow) {
 
 @class PXEnvironmentModelSelectorViewController;
 @class PXNetworkTypeSelectorViewController;
+@interface PXAppEnvironmentModeViewController : UITableViewController
+@end
 
 static NSString *const PXModelCompatibilityIsCompatibleKey = @"isCompatible";
 static NSString *const PXModelCompatibilityMismatchSummaryKey = @"mismatchSummary";
@@ -265,7 +267,7 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == PXSettingsSectionEnvironment) { return PXEnvironmentRowCount; }
-    return section == PXSettingsSectionAppScope ? 1 : 2;
+    return 2;
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
@@ -299,9 +301,16 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
             default: break;
         }
     } else if (indexPath.section == PXSettingsSectionAppScope) {
-        content.text = PXLocalizedString(@"image.settings.target_apps.title");
-        content.secondaryText = PXLocalizedFormat(@"image.settings.target_apps.summary", (long)self.targetAppCount);
-        content.image = [UIImage systemImageNamed:@"app.badge"]; identifier = @"image-settings-target-apps";
+        if(indexPath.row==0) {
+            content.text = PXLocalizedString(@"image.settings.target_apps.title");
+            content.secondaryText = PXLocalizedFormat(@"image.settings.target_apps.summary", (long)self.targetAppCount);
+            content.image = [UIImage systemImageNamed:@"app.badge"]; identifier = @"image-settings-target-apps";
+        } else {
+            content.text=PXLocalizedString(@"app_mode.title");
+            BOOL cleanup=[self.environmentPolicyStore applicationEnvironmentModeWithError:nil]==PXApplicationEnvironmentModeCleanup;
+            content.secondaryText=PXLocalizedString(cleanup?@"app_mode.cleanup":@"app_mode.backup");
+            content.image=[UIImage systemImageNamed:@"square.stack.3d.up"];identifier=@"image-settings-app-mode";
+        }
     } else if (indexPath.row == 0) {
         content.text = PXLocalizedString(@"image.settings.language.title");
         content.secondaryText = PXLocalizedString(PXUILanguagePreferenceTitleKey(PXCurrentUILanguagePreference()));
@@ -339,7 +348,8 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
         if (indexPath.row == PXEnvironmentRowCarrier) { [self handleCarrierTapped]; }
         if (indexPath.row == PXEnvironmentRowSmartLocation) { [self handleSmartLocationTapped]; }
     } else if (indexPath.section == PXSettingsSectionAppScope) {
-        [self handleTargetAppsTapped];
+        if(indexPath.row==0)[self handleTargetAppsTapped];
+        else [self.navigationController pushViewController:[[PXAppEnvironmentModeViewController alloc] initWithStyle:UITableViewStyleInsetGrouped] animated:YES];
     } else if (indexPath.section == PXSettingsSectionGeneral && indexPath.row == 0) {
         [self handleLanguageTapped];
     }
@@ -952,6 +962,38 @@ static NSString *PXLocalizedModelCompatibilityReason(NSError *error) {
 @property (nonatomic, copy) NSSet<NSNumber *> *originalNetworkTypes;
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *modelRecord;
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, id> *carrierRecord;
+@end
+
+@implementation PXAppEnvironmentModeViewController
+- (void)viewDidLoad {
+    [super viewDidLoad];self.title=PXLocalizedString(@"app_mode.title");
+    self.tableView.rowHeight=UITableViewAutomaticDimension;self.tableView.estimatedRowHeight=64;
+    self.tableView.accessibilityIdentifier=@"app-mode-list";
+}
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {(void)tableView;(void)section;return 2;}
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)path {
+    (void)tableView;UITableViewCell *cell=[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
+    BOOL backup=path.row==0;
+    UIListContentConfiguration *content=[UIListContentConfiguration subtitleCellConfiguration];
+    content.text=PXLocalizedString(backup?@"app_mode.backup":@"app_mode.cleanup");
+    content.secondaryText=PXLocalizedString(backup?@"app_mode.backup.detail":@"app_mode.cleanup.detail");content.secondaryTextProperties.numberOfLines=0;
+    content.image=[UIImage systemImageNamed:backup?@"square.stack.3d.up":@"arrow.triangle.2.circlepath"];
+    content.imageProperties.tintColor=UIColor.systemBlueColor;cell.contentConfiguration=content;
+    BOOL selected=[[PXEnvironmentPolicyStore sharedStore] applicationEnvironmentModeWithError:nil]==path.row;
+    cell.accessoryType=selected?UITableViewCellAccessoryCheckmark:UITableViewCellAccessoryNone;
+    cell.accessibilityIdentifier=backup?@"app-mode-backup":@"app-mode-cleanup";
+    cell.accessibilityTraits=UIAccessibilityTraitButton | (selected?UIAccessibilityTraitSelected:0);return cell;
+}
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {(void)tableView;(void)section;return PXLocalizedString(@"app_mode.footer");}
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)path {
+    [tableView deselectRowAtIndexPath:path animated:YES];NSError *error=nil;
+    if(![[PXEnvironmentPolicyStore sharedStore] saveApplicationEnvironmentMode:(PXApplicationEnvironmentMode)path.row error:&error]) {
+        UIAlertController *alert=[UIAlertController alertControllerWithTitle:PXLocalizedString(@"image.settings.save_failed.title") message:PXLocalizedString(@"image.settings.save_failed.recovery") preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:PXLocalizedString(@"navigation.close") style:UIAlertActionStyleCancel handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];return;
+    }
+    [self.tableView reloadData];[self.navigationController popViewControllerAnimated:YES];
+}
 @end
 
 @implementation PXNetworkTypeSelectorViewController

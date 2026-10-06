@@ -43,6 +43,7 @@ Project-local untracked config:
   Copy scripts/deploy.env.example there, fill it once, and chmod it 600.
 
 Required config keys for deploy/start/verify/status:
+  PROJECTX_SILEO_TRANSPORT       tunnel (default) or lan (HTTP only, no SSH).
   PROJECTX_SILEO_SOURCE_URL      Stable URL, exactly http://127.0.0.1:<device-port>.
   PROJECTX_SILEO_HTTP_PORT       Mac loopback HTTP port.
   PROJECTX_SILEO_DEVICE_PORT     Device loopback reverse-forward port.
@@ -58,6 +59,8 @@ publish may use PROJECTX_SILEO_PACKAGE to name the one fresh package explicitly;
 otherwise the current control version determines the expected package in packages/.
 
 This script never opens/adds a Sileo source and never installs a package.
+LAN mode needs only SOURCE_URL=http://<local-private-IPv4>:<HTTP_PORT>
+and HTTP_PORT; no SSH/device-port/identity configuration is required.
 Existing environment values override matching values from the config file.
 All deployment writes are confined to ProjectX/.deploy plus normal build outputs.
 EOF
@@ -159,6 +162,9 @@ assign_config_value() {
         PROJECTX_SILEO_SOURCE_URL)
             [ "${PROJECTX_SILEO_SOURCE_URL+x}" = x ] || PROJECTX_SILEO_SOURCE_URL=$config_value
             ;;
+        PROJECTX_SILEO_TRANSPORT)
+            [ "${PROJECTX_SILEO_TRANSPORT+x}" = x ] || PROJECTX_SILEO_TRANSPORT=$config_value
+            ;;
         PROJECTX_SILEO_HTTP_PORT)
             [ "${PROJECTX_SILEO_HTTP_PORT+x}" = x ] || PROJECTX_SILEO_HTTP_PORT=$config_value
             ;;
@@ -230,6 +236,11 @@ load_config_file() {
 }
 
 load_config_file
+
+transport_mode=${PROJECTX_SILEO_TRANSPORT:-tunnel}
+case "$transport_mode" in tunnel|lan) ;; *) fail "PROJECTX_SILEO_TRANSPORT must be tunnel or lan" ;; esac
+PROJECTX_SILEO_TRANSPORT=$transport_mode
+export PROJECTX_SILEO_TRANSPORT
 
 state_dir="$deploy_root/state"
 source_url=${PROJECTX_SILEO_SOURCE_URL:-}
@@ -349,6 +360,24 @@ validate_connection_values() {
 }
 
 validate_connection_configuration() {
+    if [ "$transport_mode" = lan ]; then
+        validate_state_path
+        validate_port PROJECTX_SILEO_HTTP_PORT "$http_port"
+        python3 - "$source_url" "$http_port" <<'LAN_VALIDATE'
+import ipaddress, socket, sys
+from urllib.parse import urlsplit
+try:
+    u = urlsplit(sys.argv[1])
+    ip = ipaddress.IPv4Address(u.hostname)
+    private = any(ip in ipaddress.IPv4Network(n) for n in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16'))
+    assert private and sys.argv[1] == 'http://%s:%s' % (ip, sys.argv[2]) and u.port == int(sys.argv[2])
+    with socket.socket() as s:
+        s.bind((str(ip), 0))
+except (ValueError, AssertionError, OSError, TypeError):
+    sys.exit('error: LAN source must use a local private IPv4 address and the HTTP port')
+LAN_VALIDATE
+        return
+    fi
     missing_configuration=""
     [ -n "$source_url" ] || append_missing PROJECTX_SILEO_SOURCE_URL
     [ -n "$http_port" ] || append_missing PROJECTX_SILEO_HTTP_PORT
@@ -362,6 +391,11 @@ validate_connection_configuration() {
 }
 
 validate_build_configuration() {
+    if [ "$transport_mode" = lan ]; then
+        validate_publish_configuration
+        validate_connection_configuration
+        return
+    fi
     missing_configuration=""
     [ -n "$source_url" ] || append_missing PROJECTX_SILEO_SOURCE_URL
     [ -n "$http_port" ] || append_missing PROJECTX_SILEO_HTTP_PORT
@@ -415,7 +449,7 @@ require_connection_commands() {
     require_command nohup
     require_command ps
     require_command sed
-    require_command ssh
+    [ "$transport_mode" = lan ] || require_command ssh
 }
 
 initialize_state() {
@@ -945,6 +979,7 @@ publish_repository() {
 
 configuration_signature() {
     {
+        printf '%s\n' "$transport_mode"
         printf '%s\n' "$state_dir"
         printf '%s\n' "$source_url"
         printf '%s\n' "$http_port"
@@ -957,6 +992,7 @@ configuration_signature() {
 }
 
 write_ssh_configs() {
+    [ "$transport_mode" = lan ] && return 0
     client_temp="$ssh_client_config.tmp.$$"
     tunnel_temp="$ssh_tunnel_config.tmp.$$"
     sanitizer_temp="$ssh_sanitizer.tmp.$$"
@@ -1024,6 +1060,11 @@ remote_fetch() {
 '*) fail "remote repository path contains unsafe characters" ;;
     esac
     remote_error=$(mktemp "$state_dir/.ssh-error.XXXXXX")
+    if [ "$transport_mode" = lan ]; then
+        remove_deploy_paths "$remote_error"
+        curl --noproxy '*' --connect-timeout 3 --max-time 30 -fsS "$source_url$remote_path" -o "$remote_destination"
+        return
+    fi
     if ssh -F "$ssh_client_config" projectx-sileo-client \
         /usr/bin/zsh -s -- "$device_port" "$remote_path" \
         > "$remote_destination" 2> "$remote_error" <<'REMOTE_ZSH'
@@ -1061,6 +1102,7 @@ REMOTE_ZSH
 }
 
 remote_port_open() {
+    [ "$transport_mode" = lan ] && return 1
     remote_port_error=$(mktemp "$state_dir/.ssh-port-error.XXXXXX")
     if ssh -F "$ssh_client_config" projectx-sileo-client \
         /usr/bin/zsh -s -- "$device_port" >/dev/null 2> "$remote_port_error" <<'REMOTE_PORT_ZSH'
@@ -1122,7 +1164,7 @@ supervisor_cleanup() {
 run_supervisor() {
     current_stage="supervisor"
     validate_repository_dir "$repository_link" || fail "published repository is invalid"
-    [ -f "$ssh_tunnel_config" ] && [ -f "$ssh_sanitizer" ] ||
+    [ "$transport_mode" = lan ] || { [ -f "$ssh_tunnel_config" ] && [ -f "$ssh_sanitizer" ]; } ||
         fail "supervisor SSH state is missing; run start"
     supervised_http_pid=""
     supervised_tunnel_pid=""
@@ -1132,6 +1174,19 @@ run_supervisor() {
     trap 'supervisor_exit_component=stop-request; exit 0' TERM
     trap 'supervisor_exit_component=interrupt; exit 130' INT
     trap supervisor_cleanup EXIT
+
+    if [ "$transport_mode" = lan ]; then
+        : >> "$logs_dir/http.log"
+        python3 -m http.server "$http_port" --bind 0.0.0.0 \
+            --directory "$repository_link" >> "$logs_dir/http.log" 2>&1 &
+        supervised_http_pid=$!
+        write_supervisor_status running http 0
+        while kill -0 "$supervised_http_pid" 2>/dev/null; do sleep 0.2; done
+        supervisor_exit_component=http
+        wait "$supervised_http_pid" 2>/dev/null || true
+        supervised_http_pid=""
+        return 1
+    fi
 
     supervisor_pipe="$run_dir/tunnel.stderr.pipe"
     remove_deploy_paths "$supervisor_pipe"
@@ -1188,7 +1243,7 @@ http_service_is_healthy() {
     healthy_http_supervisor=$1
     owned_http_child_pid "$healthy_http_supervisor" >/dev/null 2>&1 || return 1
     healthy_http_probe=$(mktemp "$state_dir/.http-probe.XXXXXX")
-    if curl -fsS "http://127.0.0.1:$http_port/Release" > "$healthy_http_probe" 2>/dev/null &&
+    if curl --noproxy '*' --connect-timeout 3 --max-time 5 -fsS "http://127.0.0.1:$http_port/Release" > "$healthy_http_probe" 2>/dev/null &&
         cmp -s "$repository_link/Release" "$healthy_http_probe"; then
         healthy_http_result=0
     else
@@ -1215,6 +1270,10 @@ tunnel_endpoint_state() {
 
 tunnel_service_is_healthy() {
     healthy_tunnel_supervisor=$1
+    if [ "$transport_mode" = lan ]; then
+        http_service_is_healthy "$healthy_tunnel_supervisor" && [ "$(tunnel_endpoint_state)" = healthy ]
+        return
+    fi
     supervisor_child_pid "$healthy_tunnel_supervisor" 'projectx-sileo-tunnel -N -T' >/dev/null 2>&1 || return 1
     [ "$(tunnel_endpoint_state)" = healthy ]
 }
@@ -1311,7 +1370,7 @@ verify_services() {
         fail "device package SHA256 does not match Packages metadata"
     remove_deploy_paths "$verify_work"
     temporary_path=""
-    echo "verified_source=stable-loopback"
+    if [ "$transport_mode" = lan ]; then echo "verified_source=lan-http"; else echo "verified_source=stable-loopback"; fi
     echo "verified_version=$repository_version"
     echo "verified_architecture=$repository_architecture"
     echo "verified_filename=$repository_filename"
@@ -1392,8 +1451,13 @@ show_status() {
     fi
     echo "supervisor=$supervisor_status"
     echo "http=$http_status"
-    echo "tunnel=$tunnel_status"
-    echo "device_endpoint=$endpoint_status"
+    if [ "$transport_mode" = lan ]; then
+        echo "tunnel=not-required"
+        echo "lan_endpoint=$endpoint_status"
+    else
+        echo "tunnel=$tunnel_status"
+        echo "device_endpoint=$endpoint_status"
+    fi
     echo "supervisor_log=$logs_dir/supervisor.log"
     echo "http_log=$logs_dir/http.log"
     echo "tunnel_log=$logs_dir/tunnel.log"
@@ -1464,7 +1528,11 @@ case "$command_name" in
         require_publish_commands
         require_connection_commands
         if [ "$dry_run" -eq 1 ]; then
-            echo "dry-run: start one detached nohup supervisor for owned loopback HTTP and reverse-tunnel children"
+            if [ "$transport_mode" = lan ]; then
+                echo "dry-run: start one detached supervisor for LAN HTTP only; no SSH"
+            else
+                echo "dry-run: start one detached nohup supervisor for owned loopback HTTP and reverse-tunnel children"
+            fi
             exit 0
         fi
         initialize_state
@@ -1476,7 +1544,7 @@ case "$command_name" in
         require_publish_commands
         require_connection_commands
         if [ "$dry_run" -eq 1 ]; then
-            echo "dry-run: verify root, Release, Packages, Packages.gz, Packages.xz, Packages.zst, and exact deb through device loopback"
+            echo "dry-run: verify all repository files and exact deb through $transport_mode transport"
             exit 0
         fi
         initialize_state

@@ -23,7 +23,7 @@ endif
 
 TWEAK_NAME = ProjectXLoader ProjectXTweak
 APPLICATION_NAME = ProjectX
-TOOL_NAME = WeaponXDaemon ProjectXKeychainWorker
+TOOL_NAME = WeaponXDaemon ProjectXKeychainWorker ProjectXAppStateWorker ProjectXAppStateVendorWorker
 
 # Tweak files
 ProjectXLoader_FILES = ProjectXLoader.m ProjectXLoaderPolicy.m PXRootHidePath.m
@@ -44,10 +44,11 @@ ProjectXTweak_CODESIGN_FLAGS = -Sent.plist
 # App files
 ProjectX_FILES = $(filter-out $(wildcard *Tests.m) Tweak.x WiFiHook.x StorageHooks.x UUIDHooks.x PasteboardHooks.x WeaponXDaemon.m PXKeychainOneShotWorker.m JailbreakDetectionBypass.m AppIdentityHookSupport.m NetworkRuntimeCoverage.m RegionEnvironment.m ProjectXLoader.m ProjectXLoaderPolicy.m PXSysctlHookRouter.m, $(wildcard *.m)) JailbreakDetectionBypass_App.m fishhook.c IOSVersionInfo.m UptimeManager.m AppVersionSpoofingViewController.m IPStatusViewController.m IPStatusCacheManager.m IPMonitorService.m ProjectXSceneDelegate.m ProgressHUDView.m PickupDropManager.m MapTabViewController+PickupDrop.m UberFareCalculator.m LocationHeaderView.m MapTabViewControllerExtension.m DomainBlockingSettings.m DomainManagementViewController.m
 ProjectX_RESOURCE_DIRS = Assets.xcassets
+ProjectX_FILES += tools/app-state/core/PXAppState.m tools/app-state/adapters/PXASNative.m
 ProjectX_RESOURCE_FILES = Info.plist Icon.png LaunchMark.png LaunchMark@2x.png LaunchMark@3x.png en.lproj zh-Hans.lproj
 ProjectX_PRIVATE_FRAMEWORKS = FrontBoardServices SpringBoardServices BackBoardServices StoreKitUI MobileCoreServices
 ProjectX_LDFLAGS = -framework CoreData -F$(THEOS_SDKS_PATH)/iPhoneOS16.5.sdk/System/Library/PrivateFrameworks -lroothide
-ProjectX_FRAMEWORKS = UIKit Foundation MobileCoreServices CoreServices StoreKit IOKit Security CoreLocation CoreLocationUI MapKit Metal OpenGLES
+ProjectX_FRAMEWORKS = UIKit Foundation MobileCoreServices CoreServices StoreKit IOKit Security LocalAuthentication CoreLocation CoreLocationUI MapKit Metal OpenGLES
 ProjectX_CODESIGN_FLAGS = -SProjectX.entitlements
 ProjectX_CFLAGS = -fobjc-arc -Werror -D SUPPORT_IPAD=1 -D ENABLE_STATE_RESTORATION=1
 
@@ -67,6 +68,20 @@ ProjectXKeychainWorker_FRAMEWORKS = Foundation Security
 ProjectXKeychainWorker_LDFLAGS = -lroothide
 ProjectXKeychainWorker_INSTALL_PATH = /Library/WeaponX
 ProjectXKeychainWorker_CODESIGN_FLAGS = -SKeychainWorkerTemplate.entitlements
+
+# Templates have no static target access groups. Only private per-operation
+# copies are signed with the target's validated exact authority.
+ProjectXAppStateWorker_FILES = tools/app-state/product/Worker.m tools/app-state/core/PXAppState.m tools/app-state/core/PXAppStateSession.m tools/app-state/adapters/PXASNative.m PXRootHidePath.m
+ProjectXAppStateWorker_CFLAGS = -fobjc-arc -Wall -Wextra -Werror
+ProjectXAppStateWorker_FRAMEWORKS = Foundation Security LocalAuthentication
+ProjectXAppStateWorker_LDFLAGS = -lroothide
+ProjectXAppStateWorker_INSTALL_PATH = /Library/WeaponX
+ProjectXAppStateWorker_CODESIGN_FLAGS = -SKeychainWorkerTemplate.entitlements
+ProjectXAppStateVendorWorker_FILES = tools/app-state/cli/VendorWorker.m
+ProjectXAppStateVendorWorker_CFLAGS = -fobjc-arc -Wall -Wextra -Werror
+ProjectXAppStateVendorWorker_FRAMEWORKS = Foundation
+ProjectXAppStateVendorWorker_INSTALL_PATH = /Library/WeaponX
+ProjectXAppStateVendorWorker_CODESIGN_FLAGS = -SAppStateVendorWorker.entitlements
 
 # Ensure app is installed to the correct location with proper permissions
 ProjectX_INSTALL_PATH = /Applications
@@ -127,6 +142,9 @@ internal-stage::
 	@echo "Installing the one-shot Keychain worker template..."
 	@cp -a $(THEOS_OBJ_DIR)/ProjectXKeychainWorker $(THEOS_STAGING_DIR)/Library/WeaponX/
 	@chmod 755 $(THEOS_STAGING_DIR)/Library/WeaponX/ProjectXKeychainWorker
+	@cp -f $(THEOS_OBJ_DIR)/ProjectXAppStateWorker $(THEOS_STAGING_DIR)/Library/WeaponX/
+	@cp -f $(THEOS_OBJ_DIR)/ProjectXAppStateVendorWorker $(THEOS_STAGING_DIR)/Library/WeaponX/
+	@chmod 755 $(THEOS_STAGING_DIR)/Library/WeaponX/ProjectXAppStateWorker $(THEOS_STAGING_DIR)/Library/WeaponX/ProjectXAppStateVendorWorker
 	@echo "Adding debug tools..."
 	@mkdir -p $(THEOS_STAGING_DIR)/usr/bin
 	@cp -a weaponx-debug.sh $(THEOS_STAGING_DIR)/usr/bin/weaponx-debug
@@ -139,6 +157,7 @@ internal-stage::
 	@python3 "$(CURDIR)/tests/SettingsAboutIconLayoutTests.py"
 	@python3 "$(CURDIR)/tests/SettingsPendingBannerTests.py"
 	@python3 "$(CURDIR)/tests/LocalizationParityTests.py"
+	@/bin/sh "$(CURDIR)/tests/run_app_state_tests.sh"
 	@/bin/sh "$(CURDIR)/tests/run_keychain_one_shot_execution_tests.sh" \
 		"$(THEOS_STAGING_DIR)/Library/WeaponX/ProjectXKeychainWorker"
 

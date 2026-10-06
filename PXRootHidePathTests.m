@@ -4,6 +4,8 @@
 #import "PXRootHidePath.h"
 
 static NSString *TestJBRootConverter(NSString *logicalPath) {
+    // RootHide's jbroot converts the virtual /rootfs namespace back to a native path.
+    if ([logicalPath hasPrefix:@"/rootfs/"]) return [logicalPath substringFromIndex:7];
     NSString *root = @"/private/randomized/.jbroot-TEST";
     return [root stringByAppendingPathComponent:[logicalPath substringFromIndex:1]];
 }
@@ -73,6 +75,12 @@ static void testSharedPathsResolveBelowSuppliedJBRoot(void) {
     PXSetRootHidePathConvertersForTesting(TestJBRootConverter, TestRootFSConverter);
 
     NSString *expectedRoot = @"/private/randomized/.jbroot-TEST";
+    assert([PXAppStateBackupRootPath() isEqualToString:@"/var/mobile/Media/AppStateBackups"]);
+    assert([PXAppStateSystemGroupsPath() isEqualToString:@"/var/containers/Shared/SystemGroup"]);
+    assert([PXAppStateOperationsPath() isEqualToString:[expectedRoot stringByAppendingPathComponent:@"var/mobile/Library/WeaponX/AppStateOperations"]]);
+    assert([PXAppStateWorkerTemplatePath() isEqualToString:[expectedRoot stringByAppendingPathComponent:@"Library/WeaponX/ProjectXAppStateWorker"]]);
+    assert([PXAppStateVendorTemplatePath() isEqualToString:[expectedRoot stringByAppendingPathComponent:@"Library/WeaponX/ProjectXAppStateVendorWorker"]]);
+    assert([PXAppStateAssociationPath() isEqualToString:[expectedRoot stringByAppendingPathComponent:@"var/mobile/Library/Preferences/com.weaponx.app-state-associations.plist"]]);
     assert([PXWeaponXDataPath() isEqualToString:
         [expectedRoot stringByAppendingPathComponent:@"var/mobile/Library/WeaponX"]]);
     assert([PXCurrentProfileInfoPath() isEqualToString:

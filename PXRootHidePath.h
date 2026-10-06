@@ -30,6 +30,12 @@ FOUNDATION_EXPORT NSString *PXWeaponXLaunchDaemonPath(void);
 FOUNDATION_EXPORT NSString *PXProjectXApplicationPath(void);
 FOUNDATION_EXPORT NSString *PXKeychainOneShotWorkerTemplatePath(void);
 FOUNDATION_EXPORT NSString *PXKeychainOneShotOperationsPath(void);
+FOUNDATION_EXPORT NSString *PXAppStateBackupRootPath(void);
+FOUNDATION_EXPORT NSString *PXAppStateSystemGroupsPath(void);
+FOUNDATION_EXPORT NSString *PXAppStateOperationsPath(void);
+FOUNDATION_EXPORT NSString *PXAppStateWorkerTemplatePath(void);
+FOUNDATION_EXPORT NSString *PXAppStateVendorTemplatePath(void);
+FOUNDATION_EXPORT NSString *PXAppStateAssociationPath(void);
 FOUNDATION_EXPORT NSString *PXBootstrapCommandPath(NSString *commandName);
 
 #if defined(PROJECTX_PATHS_TESTING)

@@ -153,6 +153,7 @@ BOOL PXEnvironmentAllowsApplicationIdentityEnsure(
 - (BOOL)writePolicy:(NSDictionary<NSString *, id> *)policy error:(NSError **)error {
     NSArray<NSString *> *allowedKeys = @[
         @"modelIdentifier",
+        @"appMode",
         @"modelSelectionMode",
         @"networkType",
         @"networkTypes",
@@ -185,6 +186,24 @@ BOOL PXEnvironmentAllowsApplicationIdentityEnsure(
 - (nullable NSMutableDictionary<NSString *, id> *)mutablePolicyWithError:(NSError **)error {
     NSDictionary<NSString *, id> *policy = [self policyWithError:error];
     return policy ? [policy mutableCopy] : nil;
+}
+
+- (PXApplicationEnvironmentMode)applicationEnvironmentModeWithError:(NSError **)error {
+    NSDictionary *policy=[self policyWithError:error];
+    id mode=policy[@"appMode"];
+    if(!mode || [mode isEqual:@"backup"])return PXApplicationEnvironmentModeBackup;
+    if([mode isEqual:@"cleanup"])return PXApplicationEnvironmentModeCleanup;
+    if(error)*error=[self policyErrorWithCode:3 description:@"Application environment mode is invalid"];
+    return PXApplicationEnvironmentModeBackup;
+}
+- (BOOL)saveApplicationEnvironmentMode:(PXApplicationEnvironmentMode)mode error:(NSError **)error {
+    if(mode!=PXApplicationEnvironmentModeBackup && mode!=PXApplicationEnvironmentModeCleanup) {
+        if(error)*error=[self policyErrorWithCode:3 description:@"Application environment mode is invalid"];
+        return NO;
+    }
+    NSMutableDictionary *policy=[self mutablePolicyWithError:error];if(!policy)return NO;
+    policy[@"appMode"]=mode==PXApplicationEnvironmentModeBackup?@"backup":@"cleanup";
+    return [self writePolicy:policy error:error];
 }
 
 - (nullable NSString *)selectedModelIdentifierWithError:(NSError **)error {

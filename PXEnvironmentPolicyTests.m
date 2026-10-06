@@ -399,8 +399,30 @@ static void testIncompatibleSelectionFailsAtomicallyWithConcreteReason(void) {
     RemovePolicyFixture(filePath);
 }
 
+static void testApplicationModeDefaultsAndPersistsWithoutChangingEnvironment(void) {
+    NSString *path=CreatePolicyPath();PXEnvironmentPolicyStore *store=[[PXEnvironmentPolicyStore alloc] initWithFilePath:path];
+    assert([store applicationEnvironmentModeWithError:nil]==PXApplicationEnvironmentModeBackup);
+    assert(([@{@"pendingChanges":@NO,@"lastAppliedGenerationID":@"unchanged"} writeToFile:path atomically:YES]));
+    assert([store saveApplicationEnvironmentMode:PXApplicationEnvironmentModeCleanup error:nil]);
+    PXEnvironmentPolicyStore *reopened=[[PXEnvironmentPolicyStore alloc] initWithFilePath:path];
+    assert([reopened applicationEnvironmentModeWithError:nil]==PXApplicationEnvironmentModeCleanup);
+    assert(![reopened hasPendingChangesWithError:nil]);
+    assert([[reopened lastAppliedGenerationIDWithError:nil] isEqual:@"unchanged"]);
+    assert([reopened setPendingChanges:YES error:nil]);
+    assert([reopened applicationEnvironmentModeWithError:nil]==PXApplicationEnvironmentModeCleanup);
+    NSDictionary *before=[NSDictionary dictionaryWithContentsOfFile:path];
+    assert(![store saveApplicationEnvironmentMode:(PXApplicationEnvironmentMode)99 error:nil]);
+    assert([[NSDictionary dictionaryWithContentsOfFile:path] isEqual:before]);
+    assert([store saveApplicationEnvironmentMode:PXApplicationEnvironmentModeBackup error:nil]);
+    assert([reopened applicationEnvironmentModeWithError:nil]==PXApplicationEnvironmentModeBackup);
+    assert([@{@"appMode":@"invalid"} writeToFile:path atomically:YES]);NSError *error=nil;
+    assert([reopened applicationEnvironmentModeWithError:&error]==PXApplicationEnvironmentModeBackup && error);
+    RemovePolicyFixture(path);
+}
+
 int main(void) {
     @autoreleasepool {
+        testApplicationModeDefaultsAndPersistsWithoutChangingEnvironment();
         testSelectionsPersistAsPendingWithoutLosingCoherentModelRecord();
         testPhysicalDeviceSelectionModePersistsWithModelSnapshot();
         testPhysicalSelectionAtomicallyClearsIncompatibleCustomSelection();

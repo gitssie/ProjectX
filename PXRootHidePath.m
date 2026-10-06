@@ -230,3 +230,24 @@ NSString *PXBootstrapCommandPath(NSString *commandName) {
     NSCParameterAssert([commandName rangeOfString:@"/"].location == NSNotFound);
     return [PXJBRootPath(@"/usr/bin") stringByAppendingPathComponent:commandName];
 }
+
+NSString *PXAppStateBackupRootPath(void) {
+    // rootfs() produces a bootstrap-virtual path. This native worker uses
+    // Foundation/POSIX, so jbroot() resolves that namespace to the real rootfs.
+    return PXJBRootPath(PXRootFSPath(@"/var/mobile/Media/AppStateBackups"));
+}
+NSString *PXAppStateSystemGroupsPath(void) {
+    return PXJBRootPath(PXRootFSPath(@"/var/containers/Shared/SystemGroup"));
+}
+NSString *PXAppStateOperationsPath(void) {
+    return [PXWeaponXDataPath() stringByAppendingPathComponent:@"AppStateOperations"];
+}
+NSString *PXAppStateWorkerTemplatePath(void) {
+    return PXJBRootPath(@"/Library/WeaponX/ProjectXAppStateWorker");
+}
+NSString *PXAppStateVendorTemplatePath(void) {
+    return PXJBRootPath(@"/Library/WeaponX/ProjectXAppStateVendorWorker");
+}
+NSString *PXAppStateAssociationPath(void) {
+    return PXPreferencesFilePath(@"com.weaponx.app-state-associations.plist");
+}

@@ -4,6 +4,11 @@ NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSString * const PXEnvironmentPolicyErrorDomain;
 
+typedef NS_ENUM(NSInteger, PXApplicationEnvironmentMode) {
+    PXApplicationEnvironmentModeBackup = 0,
+    PXApplicationEnvironmentModeCleanup
+};
+
 typedef NS_ENUM(NSInteger, PXEnvironmentNetworkType) {
     PXEnvironmentNetworkTypeUnspecified = 0,
     PXEnvironmentNetworkTypeWiFi,
@@ -47,6 +52,8 @@ FOUNDATION_EXPORT BOOL PXEnvironmentAllowsApplicationIdentityEnsure(
 
 + (instancetype)sharedStore;
 - (instancetype)initWithFilePath:(nullable NSString *)filePath;
+- (PXApplicationEnvironmentMode)applicationEnvironmentModeWithError:(NSError * _Nullable * _Nullable)error;
+- (BOOL)saveApplicationEnvironmentMode:(PXApplicationEnvironmentMode)mode error:(NSError * _Nullable * _Nullable)error;
 - (nullable NSString *)selectedModelIdentifierWithError:(NSError * _Nullable * _Nullable)error;
 - (PXEnvironmentModelSelectionMode)selectedModelSelectionModeWithError:(NSError * _Nullable * _Nullable)error;
 - (PXEnvironmentNetworkType)selectedNetworkTypeWithError:(NSError * _Nullable * _Nullable)error;
