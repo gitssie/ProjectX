@@ -6,20 +6,20 @@ Version: 1.0
 Architectures: iphoneos-arm64e
 Components: main
 Description: XenSpace packages for Dopamine RootHide on iOS 15+
-Date: Thu, 24 Sep 2026 01:12:49 GMT
+Date: Tue, 06 Oct 2026 13:28:48 GMT
 Acquire-By-Hash: no
 MD5Sum:
- 945456c6200510327d4d076daa7f526f              805 Packages
- cb693f256b381f90dd138bb7e98da490              505 Packages.gz
- 5f3a1f02668beb0b13251cbab860c0bb              596 Packages.xz
- 82925a81c87536fad2d9f9edd86c20cd              509 Packages.zst
+ 724b25157279ab12af13bca9a4a4bbad              805 Packages
+ fce5dc33491a3282a7cf61e426fb05e5              505 Packages.gz
+ d6aa9e63d0fd0eab97bda923885e9200              592 Packages.xz
+ fc4cf29723813148d9f6195bfa1b869c              507 Packages.zst
 SHA1:
- 109b0012d0562e2d1ad200ea8b64665720b90b66              805 Packages
- d1607409bcd0711308667cf0e2e4a1589d3a6227              505 Packages.gz
- 8f4f395274901a5c13583ed62e8c098bb56dedd8              596 Packages.xz
- 7fe3d7d6e78d9c4d2069368fefcb42831db6060e              509 Packages.zst
+ 747fb818eebfedd33d0ed3e7ad899b84f897dd1c              805 Packages
+ a273ce235b4f0938d0fe5219ed9d2df1ef6fdc45              505 Packages.gz
+ f7eebb47742b9113129786312acffd6b5821ec77              592 Packages.xz
+ 5b12fec28f5e1da4d1adb72b04f8893757246d68              507 Packages.zst
 SHA256:
- c243b8b90e3eb22d6470da5eae721bb7462c57f6134446eeb1494a76c543e5ae              805 Packages
- 766c4877dbe1bd40a78fb565dbeae69ace5d684e4783ed75c99bb2502eb54e7d              505 Packages.gz
- 8b9770d9d6ff3fcb875188d0b9d000da73a97ce817d0307f7d4dc2e47cbae439              596 Packages.xz
- 30d917dbe4d8ee48db31f29c2ba29a7d76a1fbe2f24f645fee9e1627f3a35fcb              509 Packages.zst
+ ab27d2f338fa365d18ae46477b0b6efe7e9da9220335137e6c9be0f6542b23fc              805 Packages
+ d50d3cff5ef3f0932f88e08a000613ecd2be2f8d0eb8bf5284ea76363a42ffd3              505 Packages.gz
+ c69a9996b99d39ffb478802b7a05e09aa31c4ae70ca4d1cb6412000cb36a5598              592 Packages.xz
+ 14a77e5cb37e7f04478e430499c969530e7971a468aef268e5e7cfb9223a0167              507 Packages.zst
